@@ -1,0 +1,7 @@
+.DS_Store
+*.dep
+settings
+/EWARM/ETH-723VE/List
+/EWARM/ETH-723VE/Obj
+/EWARM/ETH-723VE/Exe
+version.h
