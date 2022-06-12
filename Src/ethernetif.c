@@ -118,7 +118,7 @@ ETH_DMADescTypeDef DMATxDscrTab[ETH_TX_DESC_CNT] __attribute__((section(".TxDecr
 
 /* USER CODE BEGIN 2 */
 
-// stolen from the ST example. 
+// stolen from the ST example:
 // STM32Cube_FW_H7_V1.10.0\Projects\NUCLEO-H723ZG\Applications\LwIP\LwIP_UDP_Echo_Server
 
 #if defined ( __ICCARM__ ) /*!< IAR Compiler */
