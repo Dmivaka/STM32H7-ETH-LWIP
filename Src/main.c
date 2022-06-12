@@ -88,7 +88,8 @@ int main(void)
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
-
+  __HAL_RCC_D2SRAM1_CLK_ENABLE(); // have no idea how to do this from the CubeMX software.
+  HAL_Delay(1000); // does not work without this line. I believe it's linked to lan8720 start-up time. 
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
