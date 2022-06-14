@@ -1,7 +1,18 @@
+#include "main.h"
 #include "net.h"
+
+#include <string.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include "lwip.h"
+#include "lwip/udp.h"
 //-----------------------------------------------
 struct udp_pcb *upcb;
 char str1[30];
+
+#define LOCAL_PORT 1555
+#define REMOTE_PORT 1556
+uint8_t RMT_IP_ADDRESS[4] = {10,127,0,2};
 //-----------------------------------------------
 void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port);
 //-----------------------------------------------
@@ -12,9 +23,9 @@ void udp_client_connect(void)
   upcb = udp_new();
   if (upcb!=NULL)
   {
-  	IP4_ADDR(&DestIPaddr, 10, 127, 0, 0);
-  	upcb->local_port = 1555;
-  	err= udp_connect(upcb, &DestIPaddr, 1556);
+        IP4_ADDR(&DestIPaddr, RMT_IP_ADDRESS[0], RMT_IP_ADDRESS[1], RMT_IP_ADDRESS[2], RMT_IP_ADDRESS[3]);
+  	upcb->local_port = LOCAL_PORT;
+  	err= udp_connect(upcb, &DestIPaddr, REMOTE_PORT);
   	if (err == ERR_OK)
   	{
   	  udp_recv(upcb, udp_receive_callback, NULL);
