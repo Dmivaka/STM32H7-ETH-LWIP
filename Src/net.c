@@ -16,6 +16,8 @@ char str1[30];
 uint8_t RMT_IP_ADDRESS[4] = {10,127,0,0};
 
 extern FDCAN_HandleTypeDef hfdcan1;
+extern FDCAN_HandleTypeDef hfdcan2;
+extern FDCAN_HandleTypeDef hfdcan3;
 //-----------------------------------------------
 /*
   * @brief Decodes FDCAN_data_length_code into the decimal length of FDCAN message
@@ -113,43 +115,53 @@ void udp_client_send(void)
 //-----------------------------------------------
 uint8_t buffer[120] = {0};
 
-static inline uint8_t decode_bus_num( uint32_t encoded_bus )
+static inline uint8_t decode_bus_num( uint32_t encoded_bus_num )
 {
-  return encoded_bus >> 30;
+  return encoded_bus_num >> 30;
 }
 
-static inline uint32_t decode_can_id( uint32_t encoded_bus )
+static inline uint32_t decode_can_id( uint32_t encoded_can_id )
 {
-  return (encoded_bus & 0x1FFFFFFF );
+  return (encoded_can_id & 0x1FFFFFFF );
 }
 
 void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port)
 {
-  uint16_t index = 0;
-  uint8_t * data = p->payload;
+  uint16_t index = 0; // specifies number of bytes read from the udp packet. 
+  uint8_t * data = p->payload; // pointer to the dynamically allocated UDP packet payload buffer. safe to use untill buffer is freed. 
   
-  uint32_t bus_id = 0;
-  uint8_t bus = 0;
-  uint32_t id = 0;
-  uint8_t data_length = 0;
-  
-  memcpy(&buffer, data, 107);
+  //memcpy(&buffer, data, 107);
 
-  FDCAN_TxHeaderTypeDef TxHeader;
-  
-  while( index < p->len )
+  while( index < p->len ) // iterate over UDP packet
   {
-    data_length = data[index] - 5;
+    uint32_t bus_id = 0;
+    uint8_t data_length = data[index] - 5;
     index += 1;
     memcpy(&bus_id, &data[index], 4);
-    bus = decode_bus_num(bus_id);
-    id = decode_can_id(bus_id);
+    uint8_t can_bus_num = decode_bus_num( bus_id );
+    uint32_t can_msg_id = decode_can_id( bus_id );
     index += 4;
-  
-    if (HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1) != 0)
+    
+    FDCAN_HandleTypeDef *hfdcan_ptr;
+
+    if( can_bus_num == 1 )
     {
+      hfdcan_ptr = &hfdcan1;
+    }
+    else if( can_bus_num == 2 )
+    {
+      hfdcan_ptr = &hfdcan2;
+    }
+    else if( can_bus_num == 3 )
+    {
+      hfdcan_ptr = &hfdcan3;
+    }
+    
+    if (HAL_FDCAN_GetTxFifoFreeLevel(hfdcan_ptr) != 0)
+    {
+      FDCAN_TxHeaderTypeDef TxHeader;
       // Add message to Tx FIFO 
-      TxHeader.Identifier = id;
+      TxHeader.Identifier = can_msg_id;
       TxHeader.IdType = FDCAN_STANDARD_ID;
       TxHeader.TxFrameType = FDCAN_DATA_FRAME;
       TxHeader.DataLength = LengthCoder(data_length);
@@ -158,10 +170,14 @@ void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const
       TxHeader.FDFormat = FDCAN_FD_CAN;
       TxHeader.TxEventFifoControl = FDCAN_STORE_TX_EVENTS;
       TxHeader.MessageMarker = 0x00;
-      if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, data) != HAL_OK)
+      if (HAL_FDCAN_AddMessageToTxFifoQ(hfdcan_ptr, &TxHeader, data) != HAL_OK)
       {
         Error_Handler();
       }
+    }
+    else
+    {
+      Error_Handler();
     }
     
     index += data_length;
