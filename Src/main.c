@@ -62,7 +62,8 @@ static void MX_FDCAN1_Init(void);
 static void MX_FDCAN2_Init(void);
 static void MX_FDCAN3_Init(void);
 /* USER CODE BEGIN PFP */
-
+uint8_t write_can_frame(buffer_instance * s, FDCAN_RxHeaderTypeDef * head, uint8_t *data);
+uint8_t read_can_frame(buffer_instance * s, FDCAN_TxHeaderTypeDef * head, uint8_t *data);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -106,14 +107,7 @@ int main(void)
   RxHeader.Identifier = 17;
   RxHeader.DataLength = LengthCoder(32);    
   
-  write_can_frame(&gaga, &RxHeader, dummy_buffer);    
-
-  read_buffer(&gaga, more_dummy_buffer, 69);
-  
-  RxHeader.Identifier = 17;
-  RxHeader.DataLength = LengthCoder(64);   
-  
-  write_can_frame(&gaga, &RxHeader, dummy_buffer);    
+  write_can_frame(&gaga, &RxHeader, dummy_buffer);     
 
   /*********************************************/
   
@@ -524,11 +518,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   }  
 }
 
-void add_can_msg_to_fifo(void)
-{
-  return ;
-}
-
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
   FDCAN_RxHeaderTypeDef RxHeader;
@@ -564,6 +553,88 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
   }
     
   return ;
+}
+
+uint8_t push_can_frame( uint8_t bus_num, uint32_t id, uint8_t *frame_data, uint8_t frame_data_size)
+{
+  FDCAN_HandleTypeDef *hfdcan_ptr;
+  
+  if( bus_num == 1 )
+  {
+    hfdcan_ptr = &hfdcan1;
+  }
+  else if( bus_num == 2 )
+  {
+    hfdcan_ptr = &hfdcan2;
+  }
+  else if( bus_num == 3 )
+  {
+    hfdcan_ptr = &hfdcan3;
+  }
+  else
+  {
+    Error_Handler();
+  }
+  
+  if (HAL_FDCAN_GetTxFifoFreeLevel(hfdcan_ptr) != 0)
+  {
+    FDCAN_TxHeaderTypeDef TxHeader;
+    // Add message to Tx FIFO 
+    TxHeader.Identifier = id;
+    TxHeader.IdType = FDCAN_STANDARD_ID;
+    TxHeader.TxFrameType = FDCAN_DATA_FRAME;
+    TxHeader.DataLength = LengthCoder( frame_data_size );
+    TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
+    TxHeader.BitRateSwitch = FDCAN_BRS_ON;
+    TxHeader.FDFormat = FDCAN_FD_CAN;
+    TxHeader.TxEventFifoControl = FDCAN_STORE_TX_EVENTS;
+    TxHeader.MessageMarker = 0x00;
+    if (HAL_FDCAN_AddMessageToTxFifoQ(hfdcan_ptr, &TxHeader, frame_data) != HAL_OK)
+    {
+      Error_Handler();
+    }
+  }
+  else
+  {
+    Error_Handler();
+  }
+}
+
+uint8_t write_can_frame(buffer_instance * s, FDCAN_RxHeaderTypeDef * head, uint8_t *data)
+{
+  uint8_t can_message_length = LengthDecoder( head->DataLength ) + 5; // together with service bytes
+  
+  write_buffer(s, &can_message_length, 1); // write message length
+  
+  can_message_length -= 5; // 25 bytes with the service info
+  
+  uint8_t bus = 1;
+  uint32_t id = head->Identifier;
+  uint32_t bus_id = encode_bus_id( bus, id );
+
+  write_buffer(s, (uint8_t*)&bus_id, 4); // write message length
+  write_buffer(s, data, can_message_length); // write message length
+  
+  return 0;
+}
+
+uint8_t read_can_frame(buffer_instance * s, FDCAN_TxHeaderTypeDef * head, uint8_t *data)
+{
+  uint8_t can_message_length = 0;
+  uint32_t bus_id = 0;
+  uint8_t bus = 0;
+  uint32_t id = 0;
+  
+  read_buffer(s, &can_message_length, 1);
+  can_message_length -= 5;
+  read_buffer(s, (uint8_t *)&bus_id, 4);
+  read_buffer(s, data, can_message_length);
+
+  head->DataLength = LengthCoder( can_message_length );
+  head->Identifier = decode_can_id( bus_id );
+  // process can frame
+  
+  return 0;
 }
 /* USER CODE END 4 */
 
