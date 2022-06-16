@@ -23,6 +23,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "net.h"
+#include "circ_buffer.h"
+#include "helpers.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -65,7 +67,8 @@ static void MX_FDCAN3_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+uint8_t dummy_buffer[32] = {0};
+uint8_t more_dummy_buffer[32] = {0};
 /* USER CODE END 0 */
 
 /**
@@ -148,6 +151,51 @@ int main(void)
   {
     Error_Handler();
   }  
+  
+  /*********************************************
+    for( int i = 0; i < 32; i++ )
+  {
+      dummy_buffer[i] = i + 100;
+      more_dummy_buffer[i] = 0;
+  }
+  
+  buffer_instance gaga = {0, NULL, 0, {0}};
+
+  FDCAN_RxHeaderTypeDef RxHeader;
+  RxHeader.Identifier = 134;
+  RxHeader.DataLength = LengthCoder(20);
+  
+  write_can_frame(&gaga, &RxHeader, dummy_buffer);
+  
+  RxHeader.Identifier = 251;
+  RxHeader.DataLength = LengthCoder(7);  
+  
+  write_can_frame(&gaga, &RxHeader, dummy_buffer);  
+  
+  RxHeader.Identifier = 17;
+  RxHeader.DataLength = LengthCoder(32);    
+  
+  write_can_frame(&gaga, &RxHeader, dummy_buffer);    
+  
+  FDCAN_TxHeaderTypeDef TxHeader;
+  
+  while( gaga.bytes_written > 0 )
+  {
+    read_can_frame(&gaga, &TxHeader, more_dummy_buffer);
+  }
+  
+  if( gaga.bytes_written != 0 )
+  {
+    //error
+  }
+
+  write_buffer(&gaga, dummy_buffer, 5);
+  write_buffer(&gaga, dummy_buffer, 7);
+  read_buffer(&gaga, more_dummy_buffer, 11);
+  write_buffer(&gaga, dummy_buffer, 25);
+
+  *********************************************/
+  
   /* USER CODE END 2 */
 
   /* Infinite loop */

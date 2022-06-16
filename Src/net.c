@@ -1,6 +1,9 @@
 #include "main.h"
 #include "stm32h7xx_hal_fdcan.h"
 #include "net.h"
+#include "helpers.h"
+
+
 
 #include <string.h>
 #include <stdlib.h>
@@ -81,6 +84,43 @@ uint32_t LengthCoder( uint8_t length )
   }
 }
 //-----------------------------------------------
+uint8_t write_can_frame(buffer_instance * s, FDCAN_RxHeaderTypeDef * head, uint8_t *data)
+{
+  uint8_t can_message_length = LengthDecoder( head->DataLength ) + 5; // together with service bytes
+  
+  write_buffer(s, &can_message_length, 1); // write message length
+  
+  can_message_length -= 5; // 25 bytes with the service info
+  
+  uint8_t bus = 1;
+  uint32_t id = head->Identifier;
+  uint32_t bus_id = encode_bus_id( bus, id );
+
+  write_buffer(s, (uint8_t*)&bus_id, 4); // write message length
+  write_buffer(s, data, can_message_length); // write message length
+  
+  return 0;
+}
+
+uint8_t read_can_frame(buffer_instance * s, FDCAN_TxHeaderTypeDef * head, uint8_t *data)
+{
+  uint8_t can_message_length = 0;
+  uint32_t bus_id = 0;
+  uint8_t bus = 0;
+  uint32_t id = 0;
+  
+  read_buffer(s, &can_message_length, 1);
+  can_message_length -= 5;
+  read_buffer(s, (uint8_t *)&bus_id, 4);
+  read_buffer(s, data, can_message_length);
+
+  head->DataLength = LengthCoder( can_message_length );
+  head->Identifier = decode_can_id( bus_id );
+  // process can frame
+  
+  return 0;
+}
+//-----------------------------------------------
 void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port);
 //-----------------------------------------------
 void udp_client_connect(void)
@@ -114,16 +154,6 @@ void udp_client_send(void)
 }
 //-----------------------------------------------
 uint8_t buffer[120] = {0};
-
-static inline uint8_t decode_bus_num( uint32_t encoded_bus_num )
-{
-  return encoded_bus_num >> 30;
-}
-
-static inline uint32_t decode_can_id( uint32_t encoded_can_id )
-{
-  return (encoded_can_id & 0x1FFFFFFF );
-}
 
 void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port)
 {
