@@ -12,7 +12,7 @@
 #include "lwip/udp.h"
 //-----------------------------------------------
 struct udp_pcb *upcb;
-char str1[30];
+char stringer[78];
 
 #define LOCAL_PORT 1555
 #define REMOTE_PORT 1556
@@ -140,16 +140,36 @@ void udp_client_connect(void)
   }
 }
 //-----------------------------------------------
+extern buffer_instance gaga;
+
 void udp_client_send(void)
 {
   struct pbuf *p;
-  sprintf(str1,"%lu\r\n",HAL_GetTick());
-  p = pbuf_alloc(PBUF_TRANSPORT, strlen(str1), PBUF_RAM);
+  //sprintf(str1,"%lu\r\n",HAL_GetTick());
+  //p = pbuf_alloc(PBUF_TRANSPORT, strlen(str1), PBUF_RAM);
+  
+  p = pbuf_alloc(PBUF_TRANSPORT, gaga.bytes_written, PBUF_RAM);
+  
+  // 
+  if( gaga.bytes_written < buf_size - gaga.head )
+  {
+    // memcpy in one step
+    pbuf_take(p, (void *) &gaga.buffer_body[gaga.head], gaga.bytes_written);
+  }
+  else
+  {
+    // memcpy in two steps
+    pbuf_take(p, (void *) &gaga.buffer_body[gaga.head], buf_size - gaga.head);
+    pbuf_take_at(p, (void *) gaga.buffer_body, gaga.tail, buf_size - gaga.head);
+  }
+  
   if (p != NULL)
   {
-    pbuf_take(p, (void *) str1, strlen(str1));
+    //pbuf_take(p, (void *) str1, strlen(str1));
     udp_send(upcb, p);
     pbuf_free(p);
+    gaga.bytes_written -= gaga.bytes_written;
+    gaga.head = gaga.tail;
   }
 }
 //-----------------------------------------------

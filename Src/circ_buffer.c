@@ -21,6 +21,7 @@ uint8_t write_buffer(buffer_instance * s, uint8_t * local_buffer, uint8_t num_to
           s->buffer_body[ start_index + i ] = local_buffer[i];
       }
 
+      /*
       s->bytes_written += num_to_write;
 
       local_tail += num_to_write;
@@ -29,6 +30,9 @@ uint8_t write_buffer(buffer_instance * s, uint8_t * local_buffer, uint8_t num_to
           local_tail -= buf_size;
       }
       s->tail = local_tail;
+      */
+      s->bytes_written += num_to_write;
+      s->tail = update_index( s->tail, buf_size, num_to_write);
   }
   else
   {
@@ -61,6 +65,7 @@ uint8_t read_buffer(buffer_instance * s, uint8_t * local_buffer, uint8_t num_to_
             local_buffer[i] = s->buffer_body[ start_index + i ];
         }
 
+        /*
         s->bytes_written -= num_to_read;
 
         local_head += num_to_read;
@@ -69,6 +74,19 @@ uint8_t read_buffer(buffer_instance * s, uint8_t * local_buffer, uint8_t num_to_
             local_head -= buf_size;
         }
         s->head = local_head;
+        */
+        s->bytes_written -= num_to_read;
+        s->head = update_index( s->head, buf_size, num_to_read);
     }
     return 0;
+}
+
+uint16_t update_index( uint16_t index, uint16_t buffer_size, uint16_t shift)
+{
+  uint16_t local_head = index + shift;
+  if( local_head > buf_size )
+  {
+      local_head -= buf_size;
+  }
+  return local_head;
 }
