@@ -41,6 +41,7 @@ void udp_client_connect(void)
 }
 //-----------------------------------------------
 extern buffer_instance gaga;
+uint8_t debug_buf[128] = {0};
 
 void udp_client_send(void)
 {
@@ -54,9 +55,13 @@ void udp_client_send(void)
     // no data to process
     return ; 
   }
+  
+  memset(debug_buf, 0, 128);
 
   struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, bytes, PBUF_RAM); // allocate LWIP memory for outgoing UDP packet
   
+  memcpy(debug_buf, &p->payload, 128);
+    
   if (p != NULL)
   {
     if( bytes < buf_size - head0 )
@@ -70,6 +75,8 @@ void udp_client_send(void)
       pbuf_take(p, (void *) &gaga.buffer_body[head0], buf_size - head0);
       pbuf_take_at(p, (void *) gaga.buffer_body, tail0, buf_size - head0);
     }
+    
+    memcpy(debug_buf, &p->payload, 128);
 
     udp_send(upcb, p);
     pbuf_free(p);

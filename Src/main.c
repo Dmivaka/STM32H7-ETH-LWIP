@@ -614,10 +614,9 @@ uint8_t write_can_frame(buffer_instance * s, uint8_t src_bus, FDCAN_RxHeaderType
   write_buffer(s, &can_message_length, 1); // write message length
   
   can_message_length -= 5; // 25 bytes with the service info
-  
-  uint8_t bus = 1;
+
   uint32_t id = head->Identifier;
-  uint32_t bus_id = encode_bus_id( bus, id );
+  uint32_t bus_id = encode_bus_id( src_bus, id );
 
   write_buffer(s, (uint8_t*)&bus_id, 4); // write message length
   write_buffer(s, data, can_message_length); // write message length
