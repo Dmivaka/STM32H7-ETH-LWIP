@@ -48,8 +48,7 @@ void udp_client_send(void)
   uint16_t bytes = gaga.bytes_written;
   uint16_t head0 = gaga.head;
   uint16_t tail0 = gaga.tail;
-  
-  bytes = 0;
+
   if( bytes == 0 )
   {
     // no data to process
@@ -74,7 +73,7 @@ void udp_client_send(void)
 
     udp_send(upcb, p);
     pbuf_free(p);
-    gaga.bytes_written -= gaga.bytes_written;
+    gaga.bytes_written -= bytes;
     gaga.head = tail0;
   }
   else
@@ -121,6 +120,6 @@ void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const
 //-----------------------------------------------
 void TIM1_Callback(void)
 {
-  udp_client_send();
+  //udp_client_send();
 }
 //--------------------------------------------------

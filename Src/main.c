@@ -62,7 +62,7 @@ static void MX_FDCAN1_Init(void);
 static void MX_FDCAN2_Init(void);
 static void MX_FDCAN3_Init(void);
 /* USER CODE BEGIN PFP */
-uint8_t write_can_frame(buffer_instance * s, FDCAN_RxHeaderTypeDef * head, uint8_t *data);
+uint8_t write_can_frame(buffer_instance * s, uint8_t src_bus, FDCAN_RxHeaderTypeDef * head, uint8_t *data);
 uint8_t read_can_frame(buffer_instance * s, FDCAN_TxHeaderTypeDef * head, uint8_t *data);
 /* USER CODE END PFP */
 
@@ -82,11 +82,11 @@ uint8_t my_buffer[buf_size] = {0};
 int main(void)
 {
   /* USER CODE BEGIN 1 */
-    
-  /*********************************************/
   
   gaga.buffer_body = my_buffer;
-  
+    
+  /*********************************************
+
   for( int i = 0; i < 32; i++ )
   {
       dummy_buffer[i] = i + 32;
@@ -109,7 +109,7 @@ int main(void)
   
   write_can_frame(&gaga, &RxHeader, dummy_buffer);     
 
-  /*********************************************/
+  *********************************************/
   
   /* USER CODE END 1 */
 
@@ -193,6 +193,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     MX_LWIP_Process();
+    udp_client_send();
   }
   /* USER CODE END 3 */
 }
@@ -368,7 +369,7 @@ static void MX_FDCAN2_Init(void)
   hfdcan2.Init.DataSyncJumpWidth = 1;
   hfdcan2.Init.DataTimeSeg1 = 1;
   hfdcan2.Init.DataTimeSeg2 = 1;
-  hfdcan2.Init.MessageRAMOffset = 0;
+  hfdcan2.Init.MessageRAMOffset = 768;
   hfdcan2.Init.StdFiltersNbr = 0;
   hfdcan2.Init.ExtFiltersNbr = 0;
   hfdcan2.Init.RxFifo0ElmtsNbr = 32;
@@ -421,7 +422,7 @@ static void MX_FDCAN3_Init(void)
   hfdcan3.Init.DataSyncJumpWidth = 1;
   hfdcan3.Init.DataTimeSeg1 = 1;
   hfdcan3.Init.DataTimeSeg2 = 1;
-  hfdcan3.Init.MessageRAMOffset = 0;
+  hfdcan3.Init.MessageRAMOffset = 1536;
   hfdcan3.Init.StdFiltersNbr = 0;
   hfdcan3.Init.ExtFiltersNbr = 0;
   hfdcan3.Init.RxFifo0ElmtsNbr = 32;
@@ -432,7 +433,7 @@ static void MX_FDCAN3_Init(void)
   hfdcan3.Init.RxBufferSize = FDCAN_DATA_BYTES_8;
   hfdcan3.Init.TxEventsNbr = 0;
   hfdcan3.Init.TxBuffersNbr = 0;
-  hfdcan3.Init.TxFifoQueueElmtsNbr = 32;
+  hfdcan3.Init.TxFifoQueueElmtsNbr = 16;
   hfdcan3.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
   hfdcan3.Init.TxElmtSize = FDCAN_DATA_BYTES_64;
   if (HAL_FDCAN_Init(&hfdcan3) != HAL_OK)
@@ -520,11 +521,13 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
-  FDCAN_RxHeaderTypeDef RxHeader;
+  FDCAN_RxHeaderTypeDef RxHeader = {0};
   uint8_t RxData[64];
+  uint8_t bus = 0;
 
   if( hfdcan->Instance == FDCAN1 )
   {
+    bus = 1;
     // Retrieve message from Rx FIFO 0 
     if (HAL_FDCAN_GetRxMessage(&hfdcan1, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK)
     {
@@ -533,25 +536,29 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
   }
   else if( hfdcan->Instance == FDCAN2 )
   {
+    bus = 2;
     // Retrieve message from Rx FIFO 0 
     if (HAL_FDCAN_GetRxMessage(&hfdcan2, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK)
     {
       Error_Handler();
     }
-  }    
+  }
   else if( hfdcan->Instance == FDCAN3 )
   {
+    bus = 3;
     // Retrieve message from Rx FIFO 0 
     if (HAL_FDCAN_GetRxMessage(&hfdcan3, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK)
     {
       Error_Handler();
     }
-  }    
+  }
   else
   {
     Error_Handler();
   }
-    
+
+  write_can_frame(&gaga, bus, &RxHeader, RxData);  
+
   return ;
 }
 
@@ -600,7 +607,7 @@ uint8_t push_can_frame( uint8_t bus_num, uint32_t id, uint8_t *frame_data, uint8
   }
 }
 
-uint8_t write_can_frame(buffer_instance * s, FDCAN_RxHeaderTypeDef * head, uint8_t *data)
+uint8_t write_can_frame(buffer_instance * s, uint8_t src_bus, FDCAN_RxHeaderTypeDef * head, uint8_t *data)
 {
   uint8_t can_message_length = LengthDecoder( head->DataLength ) + 5; // together with service bytes
   
