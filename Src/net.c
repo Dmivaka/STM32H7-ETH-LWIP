@@ -60,7 +60,7 @@ void udp_client_send(void)
 
   struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, bytes, PBUF_RAM); // allocate LWIP memory for outgoing UDP packet
   
-  memcpy(debug_buf, &p->payload, 128);
+  memcpy(debug_buf, p->payload, 128);
     
   if (p != NULL)
   {
@@ -68,15 +68,17 @@ void udp_client_send(void)
     {
       // memcpy in one step - written data gapless
       pbuf_take(p, (void *) &gaga.buffer_body[head0], bytes);
+      memcpy(debug_buf, p->payload, 128);
     }
     else
     {
       // memcpy in two steps - data is divided in two parts - at the end and the beginning of circular buffer
       pbuf_take(p, (void *) &gaga.buffer_body[head0], buf_size - head0);
       pbuf_take_at(p, (void *) gaga.buffer_body, tail0, buf_size - head0);
+      memcpy(debug_buf, p->payload, 128);
     }
     
-    memcpy(debug_buf, &p->payload, 128);
+    memcpy(debug_buf, p->payload, 128);
 
     udp_send(upcb, p);
     pbuf_free(p);
@@ -90,12 +92,14 @@ void udp_client_send(void)
   }
 }
 //-----------------------------------------------
+uint8_t buffer[128] = {0};
+
 void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port)
 {
   uint8_t * data = p->payload; // pointer to the dynamically allocated UDP packet payload buffer. safe to use untill buffer is freed. 
   uint8_t packet_length = p->len;
   
-  //memcpy(&buffer, data, 128);
+  memcpy(&buffer, data, 128);
   
   uint16_t index = 0; // specifies number of bytes read from the udp packet. 
   
@@ -114,10 +118,15 @@ void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const
     uint8_t bus_num = decode_bus_num( bus_id );
     uint32_t frame_id = decode_can_id( bus_id );
     
+    if( bus_num == 0 )
+    {
+      while(1); 
+    }
+    
     push_can_frame( bus_num, frame_id, frame_payload, can_message_length);
   }
   
-  if( index != p->len )
+  if( index != packet_length )
   {
     Error_Handler();
   }

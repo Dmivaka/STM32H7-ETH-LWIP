@@ -3,12 +3,12 @@
 extern uint8_t dummy_buffer[32];
 extern uint8_t more_dummy_buffer[32];
 
-uint8_t write_buffer(buffer_instance * s, uint8_t * local_buffer, uint8_t num_to_write)
+uint8_t write_buffer(buffer_instance * s, uint8_t * local_buffer, uint16_t num_to_write)
 {       
   if( buf_size - s->bytes_written > num_to_write )
   {
-      int8_t start_index = s->tail; // can be negative
-      uint8_t local_tail = s->tail;
+      int16_t start_index = s->tail; // can be negative
+      uint16_t local_tail = s->tail;
       for( int i = 0; i < num_to_write; i++)
       {
           /// check on the end of buffer
@@ -42,7 +42,7 @@ uint8_t write_buffer(buffer_instance * s, uint8_t * local_buffer, uint8_t num_to
   return 0;
 }
 
-uint8_t read_buffer(buffer_instance * s, uint8_t * local_buffer, uint8_t num_to_read)
+uint8_t read_buffer(buffer_instance * s, uint8_t * local_buffer, uint16_t num_to_read)
 {
     if( num_to_read > s->bytes_written )
     {
@@ -51,8 +51,8 @@ uint8_t read_buffer(buffer_instance * s, uint8_t * local_buffer, uint8_t num_to_
     }
     else
     {
-        int8_t start_index = s->head; // can be negative
-        uint8_t local_head = s->head;
+        int16_t start_index = s->head; // can be negative
+        uint16_t local_head = s->head;
         for( int i = 0; i < num_to_read; i++)
         {
             /// check on the end of buffer
