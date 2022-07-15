@@ -149,44 +149,37 @@ int main(void)
   udp_client_connect();
   HAL_TIM_Base_Start_IT(&htim1);
   
+  // Filter for messages from master to this dedicated device. 
+  FDCAN_FilterTypeDef sFilterConfig;  
+  sFilterConfig.IdType = FDCAN_STANDARD_ID;
+  sFilterConfig.FilterIndex = 0;
+  sFilterConfig.FilterType = FDCAN_FILTER_RANGE;
+  sFilterConfig.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
+  sFilterConfig.FilterID1 = 0x0;
+  sFilterConfig.FilterID2 = 0x7FF;
+  
+  if( HAL_FDCAN_ConfigFilter(&hfdcan1, &sFilterConfig) != HAL_OK ){  Error_Handler();  }  
+  if( HAL_FDCAN_ConfigFilter(&hfdcan2, &sFilterConfig) != HAL_OK ){  Error_Handler();  }
+  
+  /* Configure global filter:
+     Filter all remote frames with STD and EXT ID
+     Reject non matching frames with STD ID and EXT ID */
+  if( HAL_FDCAN_ConfigGlobalFilter(&hfdcan1, FDCAN_REJECT, FDCAN_REJECT, FDCAN_FILTER_REMOTE, FDCAN_FILTER_REMOTE) != HAL_OK ){  Error_Handler();  }  
+  if( HAL_FDCAN_ConfigGlobalFilter(&hfdcan2, FDCAN_REJECT, FDCAN_REJECT, FDCAN_FILTER_REMOTE, FDCAN_FILTER_REMOTE) != HAL_OK ){  Error_Handler();  }
+  
   // Activate Rx FIFO 0 new message notification
-  if (HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK)
-  {
-    Error_Handler();
-  }
+  if( HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK ){  Error_Handler();  }
+  if( HAL_FDCAN_ActivateNotification(&hfdcan2, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK ){  Error_Handler();  }
   
-  if (HAL_FDCAN_Start(&hfdcan1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  
-  if (HAL_FDCAN_ActivateNotification(&hfdcan2, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  
-  if (HAL_FDCAN_Start(&hfdcan2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-/*
-  if (HAL_FDCAN_ActivateNotification(&hfdcan3, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  
-  if (HAL_FDCAN_Start(&hfdcan3) != HAL_OK)
-  {
-    Error_Handler();
-  }  
-*/
-  
+  if( HAL_FDCAN_Start(&hfdcan1) != HAL_OK ){  Error_Handler();  }  
+  if( HAL_FDCAN_Start(&hfdcan2) != HAL_OK ){  Error_Handler();  }
+
   ///////////////////////////////////////////////////////////////////////////
-  
+
   FDCAN_TxHeaderTypeDef TxHeader;
   uint8_t data[8] = {'a','b','c','d','e','f','g','h'};
   
-  if (HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1) != 0)
+  if (HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan2) != 0)
   {
     // Add message to Tx FIFO 
     TxHeader.Identifier = 0x1;
@@ -198,7 +191,7 @@ int main(void)
     TxHeader.FDFormat = FDCAN_FD_CAN;
     TxHeader.TxEventFifoControl = FDCAN_STORE_TX_EVENTS;
     TxHeader.MessageMarker = 0x00;
-    if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, data) != HAL_OK)
+    if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan2, &TxHeader, data) != HAL_OK)
     {
       Error_Handler();
     }
@@ -207,9 +200,7 @@ int main(void)
   {
 
   }  
-  
-  ///////////////////////////////////////////////////////////////////////////
-  
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -317,7 +308,7 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.DataTimeSeg1 = 5;
   hfdcan1.Init.DataTimeSeg2 = 4;
   hfdcan1.Init.MessageRAMOffset = 0;
-  hfdcan1.Init.StdFiltersNbr = 0;
+  hfdcan1.Init.StdFiltersNbr = 1;
   hfdcan1.Init.ExtFiltersNbr = 0;
   hfdcan1.Init.RxFifo0ElmtsNbr = 32;
   hfdcan1.Init.RxFifo0ElmtSize = FDCAN_DATA_BYTES_64;
@@ -383,7 +374,7 @@ static void MX_FDCAN2_Init(void)
   hfdcan2.Init.DataTimeSeg1 = 5;
   hfdcan2.Init.DataTimeSeg2 = 4;
   hfdcan2.Init.MessageRAMOffset = 768;
-  hfdcan2.Init.StdFiltersNbr = 0;
+  hfdcan2.Init.StdFiltersNbr = 1;
   hfdcan2.Init.ExtFiltersNbr = 0;
   hfdcan2.Init.RxFifo0ElmtsNbr = 32;
   hfdcan2.Init.RxFifo0ElmtSize = FDCAN_DATA_BYTES_64;
