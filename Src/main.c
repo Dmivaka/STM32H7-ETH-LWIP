@@ -161,16 +161,10 @@ int main(void)
   if( HAL_FDCAN_ConfigFilter(&hfdcan1, &sFilterConfig) != HAL_OK ){  Error_Handler();  }  
   if( HAL_FDCAN_ConfigFilter(&hfdcan2, &sFilterConfig) != HAL_OK ){  Error_Handler();  }
   
-  /* Configure global filter:
-     Filter all remote frames with STD and EXT ID
-     Reject non matching frames with STD ID and EXT ID */
+  // Configure global filter: Filter all remote frames with STD and EXT ID. Reject non matching frames with STD ID and EXT ID
   if( HAL_FDCAN_ConfigGlobalFilter(&hfdcan1, FDCAN_REJECT, FDCAN_REJECT, FDCAN_FILTER_REMOTE, FDCAN_FILTER_REMOTE) != HAL_OK ){  Error_Handler();  }  
   if( HAL_FDCAN_ConfigGlobalFilter(&hfdcan2, FDCAN_REJECT, FDCAN_REJECT, FDCAN_FILTER_REMOTE, FDCAN_FILTER_REMOTE) != HAL_OK ){  Error_Handler();  }
-  
-  // Activate Rx FIFO 0 new message notification
-  if( HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK ){  Error_Handler();  }
-  if( HAL_FDCAN_ActivateNotification(&hfdcan2, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK ){  Error_Handler();  }
-  
+
   if( HAL_FDCAN_Start(&hfdcan1) != HAL_OK ){  Error_Handler();  }  
   if( HAL_FDCAN_Start(&hfdcan2) != HAL_OK ){  Error_Handler();  }
 
@@ -179,7 +173,7 @@ int main(void)
   FDCAN_TxHeaderTypeDef TxHeader;
   uint8_t data[8] = {'a','b','c','d','e','f','g','h'};
   
-  if (HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan2) != 0)
+  if (HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1) != 0)
   {
     // Add message to Tx FIFO 
     TxHeader.Identifier = 0x1;
@@ -191,7 +185,7 @@ int main(void)
     TxHeader.FDFormat = FDCAN_FD_CAN;
     TxHeader.TxEventFifoControl = FDCAN_STORE_TX_EVENTS;
     TxHeader.MessageMarker = 0x00;
-    if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan2, &TxHeader, data) != HAL_OK)
+    if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, data) != HAL_OK)
     {
       Error_Handler();
     }
@@ -340,6 +334,12 @@ static void MX_FDCAN1_Init(void)
     Error_Handler();
   }
   
+  // Activate Rx FIFO 0 new message notification
+  if( HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK )
+  {
+    Error_Handler();
+  }
+  
   /* USER CODE END FDCAN1_Init 2 */
 
 }
@@ -402,6 +402,11 @@ static void MX_FDCAN2_Init(void)
   }
   
   if (HAL_FDCAN_EnableTxDelayCompensation(&hfdcan2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  
+  if( HAL_FDCAN_ActivateNotification(&hfdcan2, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK )
   {
     Error_Handler();
   }
