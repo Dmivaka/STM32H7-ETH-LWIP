@@ -72,6 +72,7 @@ uint8_t more_dummy_buffer[128] = {0};
 
 buffer_instance gaga = {0, NULL, 0, NULL};
 uint8_t my_buffer[buf_size] = {0};
+uint8_t timer_update_flag = 0;
 /* USER CODE END 0 */
 
 /**
@@ -208,8 +209,13 @@ int main(void)
     if( gaga.bytes_written > 70 )
     {
       udp_client_send();
+      __HAL_TIM_SET_COUNTER(&htim1, 0);
     }
-    
+    else if( timer_update_flag )
+    {
+      udp_client_send();
+      timer_update_flag = 0;
+    }
   }
   /* USER CODE END 3 */
 }
@@ -487,9 +493,9 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 1 */
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 23999;
+  htim1.Init.Prescaler = 479;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 10000;
+  htim1.Init.Period = 49;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -538,8 +544,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   if( htim->Instance == TIM1 )
   {
     //HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_6);
-    TIM1_Callback();
-  }  
+    //TIM1_Callback();
+    timer_update_flag = 1;
+  }
 }
 
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
