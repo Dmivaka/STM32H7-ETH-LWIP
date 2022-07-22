@@ -10,9 +10,13 @@
 #include "lwip.h"
 #include "lwip/udp.h"
 #include "lwip/igmp.h"
+
+#include "lcmlite.h"
 //-----------------------------------------------
 struct udp_pcb *upcb;
 char stringer[78];
+
+lcmlite_t lcm;
 
 #define LOCAL_PORT 1555
 #define REMOTE_PORT 1555
@@ -23,6 +27,16 @@ extern FDCAN_HandleTypeDef hfdcan2;
 extern FDCAN_HandleTypeDef hfdcan3;
 //-----------------------------------------------
 void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port);
+
+char channel_name[] = "DOWNSTREAM";
+static void LCM_callback(lcmlite_t *lcm, const char *channel, const void *buf, int buf_len, void *user)
+{
+  return ;
+}
+void transmit_packet(const void *_buf, int buf_len, void *user)
+{
+  return ;
+}
 //-----------------------------------------------
 void udp_client_connect(void)
 {
@@ -45,6 +59,20 @@ void udp_client_connect(void)
       udp_recv(upcb, udp_receive_callback, NULL);
     }
   }
+  
+//////////////////////////////////////////////////////////////////////////////////////////////////
+  
+  lcmlite_init(&lcm, transmit_packet, NULL);
+
+  // subscribe to LCM messages
+  if (1) {
+      lcmlite_subscription_t *sub = NULL;//malloc(sizeof(lcmlite_subscription_t));
+      sub->channel = channel_name;
+      sub->callback = LCM_callback;
+      sub->user = NULL;
+      lcmlite_subscribe(&lcm, sub);
+  }
+
 }
 //-----------------------------------------------
 extern buffer_instance gaga;
@@ -100,14 +128,23 @@ void udp_client_send(void)
 }
 //-----------------------------------------------
 uint8_t buffer[128] = {0};
+uint32_t bepis = 0;
 
 void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port)
 {
   uint8_t * data = p->payload; // pointer to the dynamically allocated UDP packet payload buffer. safe to use untill buffer is freed. 
-  uint8_t packet_length = p->len;
-  /*
-  memcpy(&buffer, data, 128);
+  uint32_t packet_length = p->len;
   
+  memcpy(&buffer, data, 128);
+  memcpy(&bepis, data, 4);
+  if( bepis == 0x3230434c ) // check on LCM magic number.
+  {
+    lcmlite_receive_packet(     &lcm,
+                                 data,
+                                 packet_length,
+                                 NULL);
+  }
+  /*
   uint16_t index = 0; // specifies number of bytes read from the udp packet. 
   
   while( index < packet_length ) // iterate over UDP packet
