@@ -9,12 +9,13 @@
 #include <stdint.h>
 #include "lwip.h"
 #include "lwip/udp.h"
+#include "lwip/igmp.h"
 //-----------------------------------------------
 struct udp_pcb *upcb;
 char stringer[78];
 
 #define LOCAL_PORT 1555
-#define REMOTE_PORT 1556
+#define REMOTE_PORT 1555
 uint8_t RMT_IP_ADDRESS[4] = {10,127,0,0};
 
 extern FDCAN_HandleTypeDef hfdcan1;
@@ -25,6 +26,12 @@ void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const
 //-----------------------------------------------
 void udp_client_connect(void)
 {
+  ip_addr_t Multicast_Addr;
+  IP4_ADDR(&Multicast_Addr, 224, 0, 0, 7 ); 
+#if LWIP_IGMP
+    igmp_joingroup(IP_ADDR_ANY,&Multicast_Addr);
+#endif
+    
   ip_addr_t DestIPaddr;
   err_t err;
   upcb = udp_new();
@@ -32,7 +39,7 @@ void udp_client_connect(void)
   {
     IP4_ADDR(&DestIPaddr, RMT_IP_ADDRESS[0], RMT_IP_ADDRESS[1], RMT_IP_ADDRESS[2], RMT_IP_ADDRESS[3]);
     upcb->local_port = LOCAL_PORT;
-    err= udp_connect(upcb, &DestIPaddr, REMOTE_PORT);
+    err= udp_bind(upcb, IP_ADDR_ANY, REMOTE_PORT);
     if (err == ERR_OK)
     {
       udp_recv(upcb, udp_receive_callback, NULL);
@@ -98,7 +105,7 @@ void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const
 {
   uint8_t * data = p->payload; // pointer to the dynamically allocated UDP packet payload buffer. safe to use untill buffer is freed. 
   uint8_t packet_length = p->len;
-  
+  /*
   memcpy(&buffer, data, 128);
   
   uint16_t index = 0; // specifies number of bytes read from the udp packet. 
@@ -130,6 +137,7 @@ void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const
   {
     Error_Handler();
   }
+*/
   
   pbuf_free(p);
 }

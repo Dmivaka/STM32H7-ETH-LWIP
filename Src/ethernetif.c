@@ -227,13 +227,16 @@ static void low_level_init(struct netif *netif)
   /* Accept broadcast address and ARP traffic */
   /* don't set NETIF_FLAG_ETHARP if this device is not an ethernet one */
   #if LWIP_ARP
-    netif->flags |= NETIF_FLAG_BROADCAST | NETIF_FLAG_ETHARP;
+    netif->flags |= NETIF_FLAG_BROADCAST | NETIF_FLAG_ETHARP | NETIF_FLAG_IGMP;
   #else
     netif->flags |= NETIF_FLAG_BROADCAST;
   #endif /* LWIP_ARP */
 
 /* USER CODE BEGIN PHY_PRE_CONFIG */
-
+  ETH_MACFilterConfigTypeDef my_filter = {DISABLE};
+  my_filter.PassAllMulticast = ENABLE;
+  my_filter.PromiscuousMode = ENABLE;
+  HAL_ETH_SetMACFilterConfig(&heth, &my_filter);
 /* USER CODE END PHY_PRE_CONFIG */
   /* Set PHY IO functions */
   LAN8742_RegisterBusIO(&LAN8742, &LAN8742_IOCtx);
