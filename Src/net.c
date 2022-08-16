@@ -28,11 +28,13 @@ extern FDCAN_HandleTypeDef hfdcan3;
 //-----------------------------------------------
 void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port);
 
-char channel_name[] = "DOWNSTREAM";
-static void LCM_callback(lcmlite_t *lcm, const char *channel, const void *buf, int buf_len, void *user)
+char hl_command_charname[] = "HL_COMMAND";
+
+static void hl_command_callback(lcmlite_t *lcm, const char *channel, const void *buf, int buf_len, void *user)
 {
   return ;
 }
+
 void transmit_packet(const void *_buf, int buf_len, void *user)
 {
   return ;
@@ -43,9 +45,9 @@ void udp_client_connect(void)
   ip_addr_t Multicast_Addr;
   IP4_ADDR(&Multicast_Addr, 224, 0, 0, 7 ); 
 #if LWIP_IGMP
-    igmp_joingroup(IP_ADDR_ANY,&Multicast_Addr);
+  igmp_joingroup(IP_ADDR_ANY,&Multicast_Addr);
 #endif
-    
+  
   ip_addr_t DestIPaddr;
   err_t err;
   upcb = udp_new();
@@ -64,15 +66,12 @@ void udp_client_connect(void)
   
   lcmlite_init(&lcm, transmit_packet, NULL);
 
-  // subscribe to LCM messages
-  if (1) {
-      lcmlite_subscription_t *sub = NULL;//malloc(sizeof(lcmlite_subscription_t));
-      sub->channel = channel_name;
-      sub->callback = LCM_callback;
-      sub->user = NULL;
-      lcmlite_subscribe(&lcm, sub);
-  }
-
+  // subscribe to HL_COMMAND messages
+  lcmlite_subscription_t *sub = malloc(sizeof(lcmlite_subscription_t));
+  sub->channel = hl_command_charname;
+  sub->callback = hl_command_callback;
+  sub->user = NULL;
+  lcmlite_subscribe(&lcm, sub);
 }
 //-----------------------------------------------
 extern buffer_instance gaga;
