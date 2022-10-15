@@ -97,7 +97,7 @@ uint8_t buffer[128] = {0};
 void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port)
 {
   uint8_t * data = p->payload; // pointer to the dynamically allocated UDP packet payload buffer. safe to use untill buffer is freed. 
-  uint8_t packet_length = p->len;
+  uint16_t packet_length = p->len;
   
   memcpy(&buffer, data, 128);
   
