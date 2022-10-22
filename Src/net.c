@@ -15,7 +15,7 @@ char stringer[78];
 
 #define LOCAL_PORT 1555
 #define REMOTE_PORT 1556
-uint8_t RMT_IP_ADDRESS[4] = {10,127,0,0};
+uint8_t RMT_IP_ADDRESS[4] = {192,168,2,105};
 
 extern FDCAN_HandleTypeDef hfdcan1;
 extern FDCAN_HandleTypeDef hfdcan2;
@@ -92,15 +92,13 @@ void udp_client_send(void)
   }
 }
 //-----------------------------------------------
-uint8_t buffer[128] = {0};
+extern buffer_instance bus1_circ_buff;
 
 void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port)
 {
   uint8_t * data = p->payload; // pointer to the dynamically allocated UDP packet payload buffer. safe to use untill buffer is freed. 
   uint16_t packet_length = p->len;
-  
-  memcpy(&buffer, data, 128);
-  
+
   uint16_t index = 0; // specifies number of bytes read from the udp packet. 
   
   while( index < packet_length ) // iterate over UDP packet
@@ -108,22 +106,17 @@ void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const
     uint32_t bus_id = 0;
 
     // parse one can frame from the rx UDP packet
-    uint8_t can_message_length = data[index] - 5;
-    index += 1;
-    memcpy(&bus_id, &data[index], 4);
-    index += 4;
-    uint8_t * frame_payload = &data[index];
-    index += can_message_length;
-    
+    uint8_t can_frame_length = data[index];
+    memcpy(&bus_id, &data[index+1], 4);
     uint8_t bus_num = decode_bus_num( bus_id );
-    uint32_t frame_id = decode_can_id( bus_id );
-    
+
     if( bus_num == 0 )
     {
-      while(1); 
+      Error_Handler();
     }
     
-    push_can_frame( bus_num, frame_id, frame_payload, can_message_length);
+    write_buffer(&bus1_circ_buff, &data[index], can_frame_length); // write message length
+    index += can_frame_length;
   }
   
   if( index != packet_length )

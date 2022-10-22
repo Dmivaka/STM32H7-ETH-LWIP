@@ -73,6 +73,9 @@ uint8_t more_dummy_buffer[128] = {0};
 buffer_instance gaga = {0, NULL, 0, NULL};
 uint8_t my_buffer[buf_size] = {0};
 uint8_t timer_update_flag = 0;
+
+buffer_instance bus1_circ_buff = {0, NULL, 0, NULL};
+uint8_t my_2nd_buffer[buf_size] = {0};
 /* USER CODE END 0 */
 
 /**
@@ -84,6 +87,7 @@ int main(void)
   /* USER CODE BEGIN 1 */
   
   gaga.buffer_body = my_buffer;
+  bus1_circ_buff.buffer_body = my_2nd_buffer;
     
   /*********************************************
 
