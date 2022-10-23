@@ -25,6 +25,7 @@
 #include "net.h"
 #include "circ_buffer.h"
 #include "helpers.h"
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -76,6 +77,7 @@ uint8_t timer_update_flag = 0;
 
 buffer_instance bus1_circ_buff = {0, NULL, 0, NULL};
 uint8_t my_2nd_buffer[buf_size] = {0};
+uint16_t bus1_frames_stored = 0;
 /* USER CODE END 0 */
 
 /**
@@ -153,6 +155,11 @@ int main(void)
   /* USER CODE BEGIN 2 */
   udp_client_connect();
   HAL_TIM_Base_Start_IT(&htim1);
+  
+  if (HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_TX_FIFO_EMPTY, FDCAN_TX_BUFFER0 | FDCAN_TX_BUFFER1 | FDCAN_TX_BUFFER2) != HAL_OK)
+  {
+    Error_Handler();
+  }
   
   // Filter for messages from master to this dedicated device. 
   FDCAN_FilterTypeDef sFilterConfig;  
@@ -596,8 +603,43 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
   return ;
 }
 
-uint8_t push_can_frame( uint8_t bus_num, uint32_t id, uint8_t *frame_data, uint8_t frame_data_size)
+uint8_t local_buffer[69] = {0};
+
+void HAL_FDCAN_TxFifoEmptyCallback(FDCAN_HandleTypeDef *hfdcan)
 {
+  uint8_t free_level = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1);
+  while( free_level != 0 && bus1_frames_stored > 0 )
+  {
+    uint8_t full_frame_length = bus1_circ_buff.buffer_body[bus1_circ_buff.head]; // the length of the frame is stored in it's head
+    
+    if( read_buffer(&bus1_circ_buff, local_buffer, full_frame_length) )
+    {
+      return ;
+    }
+    
+    bus1_frames_stored--;
+
+    if( push_can_frame( local_buffer, full_frame_length) == 1 )
+    {
+      uint32_t sosiska = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1);
+      Error_Handler();
+    }
+    
+    free_level = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1);
+  }
+  
+  return ;
+}
+
+// push VB CAN frame into CAN FIFO
+uint8_t push_can_frame( uint8_t *frame_data, uint8_t frame_full_size)
+{
+  uint32_t bus_id = 0;
+  memcpy(&bus_id, &frame_data[1], 4);
+
+  uint8_t bus_num = decode_bus_num( bus_id );
+  uint32_t id = decode_can_id( bus_id );    
+
   FDCAN_HandleTypeDef *hfdcan_ptr;
   
   if( bus_num == 1 )
@@ -624,21 +666,24 @@ uint8_t push_can_frame( uint8_t bus_num, uint32_t id, uint8_t *frame_data, uint8
     TxHeader.Identifier = id;
     TxHeader.IdType = FDCAN_STANDARD_ID;
     TxHeader.TxFrameType = FDCAN_DATA_FRAME;
-    TxHeader.DataLength = LengthCoder( frame_data_size );
+    TxHeader.DataLength = LengthCoder( frame_full_size - 5 );
     TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
     TxHeader.BitRateSwitch = FDCAN_BRS_ON;
     TxHeader.FDFormat = FDCAN_FD_CAN;
     TxHeader.TxEventFifoControl = FDCAN_STORE_TX_EVENTS;
     TxHeader.MessageMarker = 0x00;
-    if (HAL_FDCAN_AddMessageToTxFifoQ(hfdcan_ptr, &TxHeader, frame_data) != HAL_OK)
+    if (HAL_FDCAN_AddMessageToTxFifoQ(hfdcan_ptr, &TxHeader, &frame_data[5]) != HAL_OK)
     {
       Error_Handler();
     }
+    //HAL_Delay(1);
   }
   else
   {
-    Error_Handler();
+    return 1;
   }
+  
+  return 0;
 }
 
 uint8_t write_can_frame(buffer_instance * s, uint8_t src_bus, FDCAN_RxHeaderTypeDef * head, uint8_t *data)

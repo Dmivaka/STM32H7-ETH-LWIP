@@ -93,6 +93,7 @@ void udp_client_send(void)
 }
 //-----------------------------------------------
 extern buffer_instance bus1_circ_buff;
+extern uint16_t bus1_frames_stored;
 
 void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port)
 {
@@ -115,7 +116,16 @@ void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const
       Error_Handler();
     }
     
-    write_buffer(&bus1_circ_buff, &data[index], can_frame_length); // write message length
+    if( HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1) > 0 )
+    {
+      push_can_frame( &data[index], can_frame_length);
+    }
+    else
+    {
+      write_buffer(&bus1_circ_buff, &data[index], can_frame_length); // write message length
+      bus1_frames_stored++;
+    }
+
     index += can_frame_length;
   }
   
