@@ -356,7 +356,7 @@ void TIM1_UP_IRQHandler(void)
 
   /* USER CODE END TIM1_UP_IRQn 1 */
 }
-
+volatile uint8_t debug3 = 0;
 /**
   * @brief This function handles SPI1 global interrupt.
   */
@@ -365,7 +365,9 @@ void SPI1_IRQHandler(void)
   /* USER CODE BEGIN SPI1_IRQn 0 */
   if( LL_SPI_IsActiveFlag_EOT(SPI1) )
   {
+    debug3++;
     LL_GPIO_ResetOutputPin(GPIOD, LL_GPIO_PIN_6);
+    //for( int i = 0; i < 30; i++ ); // stupid delay couse without it DMA returns wrong counter value
   }
   /* USER CODE END SPI1_IRQn 0 */
   HAL_SPI_IRQHandler(&hspi1);

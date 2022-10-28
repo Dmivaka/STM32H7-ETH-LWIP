@@ -103,6 +103,9 @@ uint8_t my_buffer[buf_size] = {0};
 uint8_t timer_update_flag = 0;
 
 uint16_t bus1_frames_stored = 0;
+
+extern uint8_t companion_TX_buf[buf_size];
+extern buffer_instance companion_TX_ins;
 /* USER CODE END 0 */
 
 /**
@@ -279,8 +282,8 @@ int main(void)
     /* USER CODE BEGIN 3 */
     if( HAL_GetTick() > timestamp )
     {
-      LL_GPIO_SetOutputPin(GPIOD, LL_GPIO_PIN_6);
-      HAL_SPI_Transmit_DMA(&hspi1, tx_buffer, 512);
+      //LL_GPIO_SetOutputPin(GPIOD, LL_GPIO_PIN_6);
+      //HAL_SPI_Transmit_DMA(&hspi1, tx_buffer, 512);
       timestamp += 1000;
     }
     
@@ -799,6 +802,13 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
   uint8_t RxData[64];
   uint8_t bus = 0;
 
+  HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &RxHeader, RxData);
+  
+  /*
+  FDCAN_RxHeaderTypeDef RxHeader = {0};
+  uint8_t RxData[64];
+  uint8_t bus = 0;
+
   if( hfdcan->Instance == FDCAN1 )
   {
     bus = 1;
@@ -832,6 +842,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
   }
 
   write_can_frame(&gaga, bus, &RxHeader, RxData);  
+  */
 
   return ;
 }
@@ -911,6 +922,38 @@ uint8_t push_can_frame( FDCAN_HandleTypeDef *handle, uint8_t *frame_data, uint8_
   
   return 0;
 }
+
+void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
+{
+  if( hspi->Instance == SPI1 )
+  {
+    push_udp_frame();
+  }
+}
+
+// push VB CAN frame into CAN FIFO
+uint8_t push_udp_frame(void)
+{
+  buffer_instance *s = &companion_TX_ins;
+  // trasmit complete callback
+  if( s->bytes_written > 0 )
+  {
+    uint8_t frame_length = s->buffer_body[s->head]; // get the frame length, it's located at the beginning of new frame in the buffer
+    if( frame_length > s->bytes_written )
+    {
+      // buffer is corrupted
+      Error_Handler();
+    }
+
+    read_buffer( s, tx_buffer, frame_length);
+    
+    LL_GPIO_SetOutputPin(GPIOD, LL_GPIO_PIN_6);
+    HAL_SPI_Transmit_DMA(&hspi1, tx_buffer, frame_length);      
+  }
+  
+  return 0;
+}
+
 
 uint8_t write_can_frame(buffer_instance * s, uint8_t src_bus, FDCAN_RxHeaderTypeDef * head, uint8_t *data)
 {

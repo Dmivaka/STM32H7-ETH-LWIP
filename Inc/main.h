@@ -54,6 +54,7 @@ void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
 uint8_t push_can_frame( FDCAN_HandleTypeDef *handle, uint8_t *frame_data, uint8_t frame_full_size);
+uint8_t push_udp_frame(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
