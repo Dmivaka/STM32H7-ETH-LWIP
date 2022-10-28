@@ -53,8 +53,7 @@ extern "C" {
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
-uint8_t push_can_frame( uint8_t *frame_data, uint8_t frame_full_size);
-void loshadka(void);
+uint8_t push_can_frame( FDCAN_HandleTypeDef *handle, uint8_t *frame_data, uint8_t frame_full_size);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/

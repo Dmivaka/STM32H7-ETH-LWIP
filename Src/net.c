@@ -17,9 +17,8 @@ char stringer[78];
 #define REMOTE_PORT 1556
 uint8_t RMT_IP_ADDRESS[4] = {192,168,2,105};
 
-extern FDCAN_HandleTypeDef hfdcan1;
-extern FDCAN_HandleTypeDef hfdcan2;
-extern FDCAN_HandleTypeDef hfdcan3;
+extern FDCAN_HandleTypeDef * FDCAN_Handles_Map[3];
+extern buffer_instance * TX_Buffers_Map[3];
 //-----------------------------------------------
 void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port);
 //-----------------------------------------------
@@ -91,9 +90,10 @@ void udp_client_send(void)
     Error_Handler();
   }
 }
-//-----------------------------------------------
-extern buffer_instance bus1_circ_buff;
-extern uint16_t bus1_frames_stored;
+
+
+uint8_t companion_TX_buf[buf_size] = {0};
+buffer_instance companion_TX_ins = {0, NULL, 0, companion_TX_buf};
 
 void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port)
 {
@@ -110,20 +110,31 @@ void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const
     uint8_t can_frame_length = data[index];
     memcpy(&bus_id, &data[index+1], 4);
     uint8_t bus_num = decode_bus_num( bus_id );
-
-    if( bus_num == 0 )
-    {
-      Error_Handler();
-    }
     
-    if( HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1) > 0 )
+    if( bus_num < 3 )
     {
-      push_can_frame( &data[index], can_frame_length);
+      FDCAN_HandleTypeDef * FDCAN_Handle = FDCAN_Handles_Map[bus_num];
+      buffer_instance *TX_buffer = TX_Buffers_Map[bus_num];
+      
+      if( FDCAN_Handle != NULL )
+      {    
+        if( HAL_FDCAN_GetTxFifoFreeLevel(FDCAN_Handle) > 0 )
+        {
+          push_can_frame( FDCAN_Handle, &data[index], can_frame_length);
+        }
+        else
+        {
+          write_buffer(TX_buffer, &data[index], can_frame_length); // write message length
+        }
+      }
+      else
+      {
+        // this bus is disabled
+      }
     }
     else
     {
-      write_buffer(&bus1_circ_buff, &data[index], can_frame_length); // write message length
-      bus1_frames_stored++;
+      write_buffer(&companion_TX_ins, &data[index], can_frame_length); // write message length
     }
 
     index += can_frame_length;

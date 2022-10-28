@@ -58,6 +58,22 @@ DMA_HandleTypeDef hdma_spi3_rx;
 TIM_HandleTypeDef htim1;
 
 /* USER CODE BEGIN PV */
+uint8_t FDCAN1_TX_buf[buf_size] = {0};
+buffer_instance FDCAN1_TX_ins = {0, NULL, 0, FDCAN1_TX_buf};
+
+uint8_t FDCAN2_TX_buf[buf_size] = {0};
+buffer_instance FDCAN2_TX_ins = {0, NULL, 0, FDCAN2_TX_buf};
+
+uint8_t FDCAN3_TX_buf[buf_size] = {0};
+buffer_instance FDCAN3_TX_ins = {0, NULL, 0, FDCAN3_TX_buf};
+
+FDCAN_HandleTypeDef * FDCAN_Handles_Map[3] = {&hfdcan1, &hfdcan2, &hfdcan3};
+buffer_instance * TX_Buffers_Map[3] = { &FDCAN1_TX_ins, &FDCAN2_TX_ins, &FDCAN3_TX_ins};
+
+#pragma location=0x30005000
+uint8_t tx_buffer[512] = {0};
+#pragma location=0x30005200
+uint8_t rx_buffer[512] = {0};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -86,14 +102,7 @@ buffer_instance gaga = {0, NULL, 0, NULL};
 uint8_t my_buffer[buf_size] = {0};
 uint8_t timer_update_flag = 0;
 
-buffer_instance bus1_circ_buff = {0, NULL, 0, NULL};
-uint8_t my_2nd_buffer[buf_size] = {0};
 uint16_t bus1_frames_stored = 0;
-
-#pragma location=0x30005000
-uint8_t tx_buffer[512] = {0};
-#pragma location=0x30005200
-uint8_t rx_buffer[512] = {0};
 /* USER CODE END 0 */
 
 /**
@@ -104,8 +113,9 @@ int main(void)
 {
   /* USER CODE BEGIN 1 */
   
+  // bind uint8_t arrays to each circular buffer instance
+  
   gaga.buffer_body = my_buffer;
-  bus1_circ_buff.buffer_body = my_2nd_buffer;
     
   /*********************************************
 
@@ -197,18 +207,39 @@ int main(void)
   sFilterConfig.FilterType = FDCAN_FILTER_RANGE;
   sFilterConfig.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
   sFilterConfig.FilterID1 = 0x0;
-  sFilterConfig.FilterID2 = 0x7FF;
+  sFilterConfig.FilterID2 = 0x7FF;  
   
-  if( HAL_FDCAN_ConfigFilter(&hfdcan1, &sFilterConfig) != HAL_OK ){  Error_Handler();  }  
-  if( HAL_FDCAN_ConfigFilter(&hfdcan2, &sFilterConfig) != HAL_OK ){  Error_Handler();  }
-  
-  // Configure global filter: Filter all remote frames with STD and EXT ID. Reject non matching frames with STD ID and EXT ID
-  if( HAL_FDCAN_ConfigGlobalFilter(&hfdcan1, FDCAN_REJECT, FDCAN_REJECT, FDCAN_FILTER_REMOTE, FDCAN_FILTER_REMOTE) != HAL_OK ){  Error_Handler();  }  
-  if( HAL_FDCAN_ConfigGlobalFilter(&hfdcan2, FDCAN_REJECT, FDCAN_REJECT, FDCAN_FILTER_REMOTE, FDCAN_FILTER_REMOTE) != HAL_OK ){  Error_Handler();  }
+  // iterate over three CAN bus handles and enable their parameters
+  for( int i = 0; i < 3; i++)
+  {
+    // choose one FDCAN Handle from the three available
+    FDCAN_HandleTypeDef * FDCAN_Handle = FDCAN_Handles_Map[i];
+    
+    if( FDCAN_Handle != NULL )
+    {
+      // Configure CAN frames filtering 
+      if( HAL_FDCAN_ConfigFilter(FDCAN_Handle, &sFilterConfig) != HAL_OK ){ Error_Handler(); }  
+      
+      // Configure global filter: Filter all remote frames with STD and EXT ID. Reject non matching frames with STD ID and EXT ID
+      if( HAL_FDCAN_ConfigGlobalFilter(FDCAN_Handle, FDCAN_REJECT, FDCAN_REJECT, FDCAN_FILTER_REMOTE, FDCAN_FILTER_REMOTE) != HAL_OK ){ Error_Handler(); }
+      
+      // Configure and enable Tx Delay Compensation, required for BRS mode.
+      if( HAL_FDCAN_ConfigTxDelayCompensation(FDCAN_Handle, 5, 0) != HAL_OK){ Error_Handler(); }
+      if( HAL_FDCAN_EnableTxDelayCompensation(FDCAN_Handle) != HAL_OK){ Error_Handler(); }
+      
+      // Activate Rx FIFO 0 new message notification
+      if( HAL_FDCAN_ActivateNotification(FDCAN_Handle, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK ){ Error_Handler(); }      
+      
+      // Activate TX FIFO empty notification
+      if( HAL_FDCAN_ActivateNotification( FDCAN_Handle, 
+                                          FDCAN_IT_TX_FIFO_EMPTY, 
+                                          FDCAN_TX_BUFFER0 | FDCAN_TX_BUFFER1 | FDCAN_TX_BUFFER2) != HAL_OK )
+                                          { Error_Handler(); }
 
-  if( HAL_FDCAN_Start(&hfdcan1) != HAL_OK ){  Error_Handler();  }  
-  if( HAL_FDCAN_Start(&hfdcan2) != HAL_OK ){  Error_Handler();  }
-
+      // Start FDCAN periphery
+      if( HAL_FDCAN_Start(FDCAN_Handle) != HAL_OK ){ Error_Handler(); }
+    }
+  }
   ///////////////////////////////////////////////////////////////////////////
 
   FDCAN_TxHeaderTypeDef TxHeader;
@@ -805,36 +836,48 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
   return ;
 }
 
+// https://stackoverflow.com/a/25004214
+uint8_t findIndex(FDCAN_HandleTypeDef *array, size_t size, FDCAN_HandleTypeDef* target) 
+{
+    uint8_t i=0;
+    while((i<size) && (&array[i] != target)) i++;
+
+    return (i<size) ? (i) : (-1);
+}
+
 uint8_t local_buffer[69] = {0};
 
 void HAL_FDCAN_TxFifoEmptyCallback(FDCAN_HandleTypeDef *hfdcan)
 {
-  uint8_t free_level = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1);
-  while( free_level != 0 && bus1_frames_stored > 0 )
+  // this callback shouldnt be called fof disabled CAN buses, so no need to check for NULL pointer
+  
+  // find bus number from the handle name 
+  uint8_t bus_num = findIndex(*FDCAN_Handles_Map, 3, hfdcan);
+  buffer_instance *TX_buffer = TX_Buffers_Map[bus_num];
+  
+  uint8_t free_level = HAL_FDCAN_GetTxFifoFreeLevel(hfdcan);
+  while( free_level != 0 && TX_buffer->bytes_written > 0 )
   {
-    uint8_t full_frame_length = bus1_circ_buff.buffer_body[bus1_circ_buff.head]; // the length of the frame is stored in it's head
+    uint8_t full_frame_length = TX_buffer->buffer_body[TX_buffer->head]; // the length of the frame is stored in it's head
     
-    if( read_buffer(&bus1_circ_buff, local_buffer, full_frame_length) )
+    if( read_buffer(TX_buffer, local_buffer, full_frame_length) )
     {
       return ;
     }
-    
-    bus1_frames_stored--;
 
-    if( push_can_frame( local_buffer, full_frame_length) == 1 )
+    if( push_can_frame(hfdcan, local_buffer, full_frame_length) == 1 )
     {
-      uint32_t sosiska = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1);
       Error_Handler();
     }
     
-    free_level = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1);
+    free_level = HAL_FDCAN_GetTxFifoFreeLevel(hfdcan);
   }
   
   return ;
 }
 
 // push VB CAN frame into CAN FIFO
-uint8_t push_can_frame( uint8_t *frame_data, uint8_t frame_full_size)
+uint8_t push_can_frame( FDCAN_HandleTypeDef *handle, uint8_t *frame_data, uint8_t frame_full_size)
 {
   uint32_t bus_id = 0;
   memcpy(&bus_id, &frame_data[1], 4);
@@ -842,26 +885,7 @@ uint8_t push_can_frame( uint8_t *frame_data, uint8_t frame_full_size)
   uint8_t bus_num = decode_bus_num( bus_id );
   uint32_t id = decode_can_id( bus_id );    
 
-  FDCAN_HandleTypeDef *hfdcan_ptr;
-  
-  if( bus_num == 1 )
-  {
-    hfdcan_ptr = &hfdcan1;
-  }
-  else if( bus_num == 2 )
-  {
-    hfdcan_ptr = &hfdcan2;
-  }
-  else if( bus_num == 3 )
-  {
-    hfdcan_ptr = &hfdcan3;
-  }
-  else
-  {
-    Error_Handler();
-  }
-  
-  if (HAL_FDCAN_GetTxFifoFreeLevel(hfdcan_ptr) != 0)
+  if (HAL_FDCAN_GetTxFifoFreeLevel(handle) != 0)
   {
     FDCAN_TxHeaderTypeDef TxHeader;
     // Add message to Tx FIFO 
@@ -874,11 +898,11 @@ uint8_t push_can_frame( uint8_t *frame_data, uint8_t frame_full_size)
     TxHeader.FDFormat = FDCAN_FD_CAN;
     TxHeader.TxEventFifoControl = FDCAN_STORE_TX_EVENTS;
     TxHeader.MessageMarker = 0x00;
-    if (HAL_FDCAN_AddMessageToTxFifoQ(hfdcan_ptr, &TxHeader, &frame_data[5]) != HAL_OK)
+    if (HAL_FDCAN_AddMessageToTxFifoQ(handle, &TxHeader, &frame_data[5]) != HAL_OK)
     {
       Error_Handler();
     }
-    //HAL_Delay(1);
+    HAL_Delay(10);
   }
   else
   {
