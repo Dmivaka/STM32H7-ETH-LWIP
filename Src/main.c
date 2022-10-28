@@ -90,9 +90,9 @@ buffer_instance bus1_circ_buff = {0, NULL, 0, NULL};
 uint8_t my_2nd_buffer[buf_size] = {0};
 uint16_t bus1_frames_stored = 0;
 
-#pragma location=0x30004000
+#pragma location=0x30005000
 uint8_t tx_buffer[512] = {0};
-#pragma location=0x30004200
+#pragma location=0x30005200
 uint8_t rx_buffer[512] = {0};
 /* USER CODE END 0 */
 
