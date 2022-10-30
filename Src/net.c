@@ -22,7 +22,6 @@ uint8_t RMT_IP_ADDRESS[4] = {192,168,2,105};
 extern FDCAN_HandleTypeDef * FDCAN_Handles_Map[3];
 extern buffer_instance * TX_Buffers_Map[3];
 
-extern DMA_HandleTypeDef hdma_spi1_tx;
 //-----------------------------------------------
 void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port);
 //-----------------------------------------------
@@ -95,11 +94,10 @@ void udp_client_send(void)
   }
 }
 
-
 uint8_t companion_TX_buf[buf_size] = {0};
 buffer_instance companion_TX_ins = {0, NULL, 0, companion_TX_buf};
 
-volatile uint8_t debug_counter = 0;
+volatile uint32_t debug_counter = 0;
 void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port)
 {
   uint8_t * data = p->payload; // pointer to the dynamically allocated UDP packet payload buffer. safe to use untill buffer is freed. 
@@ -125,11 +123,16 @@ void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const
       {    
         if( HAL_FDCAN_GetTxFifoFreeLevel(FDCAN_Handle) > 0 )
         {
+          // if interrupt fires right now it will try access TX_buffer in line below
           push_can_frame( FDCAN_Handle, &data[index], can_frame_length);
         }
         else
         {
-          write_buffer(TX_buffer, &data[index], can_frame_length); // write message length
+          // this section should be critical
+          uint32_t primask_bit = __get_PRIMASK();  // backup PRIMASK bit
+          __disable_irq();                  // Disable all interrupts by setting PRIMASK bit on Cortex
+            write_buffer(TX_buffer, &data[index], can_frame_length); // write message length
+          __set_PRIMASK(primask_bit);     // Restore PRIMASK bit
         }
       }
       else
@@ -140,13 +143,18 @@ void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const
     else
     {
       debug_counter++;
-      if( LL_SPI_IsActiveMasterTransfer(SPI1) )
-      {
+      // SPI transfer section. 
+      // There's at least one frame ready to be processed. 
+      // If no SPI transfers (1st frame in series), load it directly into the SPI FIFO.
+      
+      uint32_t primask_bit = __get_PRIMASK();  // backup PRIMASK bit
+      __disable_irq();                  // Disable all interrupts by setting PRIMASK bit on Cortex
+        // while we are accessing the buffer the SPI interrupt can occur - it will corrupt it. 
         write_buffer(&companion_TX_ins, &data[index], can_frame_length); // write message length
-      }
-      else
+      __set_PRIMASK(primask_bit);     // Restore PRIMASK bit
+      
+      if( !LL_SPI_IsActiveMasterTransfer(SPI1) )
       {
-        write_buffer(&companion_TX_ins, &data[index], can_frame_length); // write message length
         push_udp_frame();
       }
     }

@@ -28,6 +28,7 @@
 #include <string.h>
 
 #include "stm32h7xx_ll_gpio.h"
+#include "stm32h7xx_ll_spi.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -871,6 +872,7 @@ void HAL_FDCAN_TxFifoEmptyCallback(FDCAN_HandleTypeDef *hfdcan)
   {
     uint8_t full_frame_length = TX_buffer->buffer_body[TX_buffer->head]; // the length of the frame is stored in it's head
     
+    // this code can be interrupted only by other CAN periph blocks so no need of critical section. 
     if( read_buffer(TX_buffer, local_buffer, full_frame_length) )
     {
       return ;
@@ -934,26 +936,35 @@ void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
 // push VB CAN frame into CAN FIFO
 uint8_t push_udp_frame(void)
 {
-  buffer_instance *s = &companion_TX_ins;
-  // trasmit complete callback
-  if( s->bytes_written > 0 )
+  if( !LL_SPI_IsActiveMasterTransfer(SPI1) )
   {
-    uint8_t frame_length = s->buffer_body[s->head]; // get the frame length, it's located at the beginning of new frame in the buffer
-    if( frame_length > s->bytes_written )
-    {
-      // buffer is corrupted
-      Error_Handler();
-    }
+    buffer_instance *s = &companion_TX_ins;
 
-    read_buffer( s, tx_buffer, frame_length);
-    
-    LL_GPIO_SetOutputPin(GPIOD, LL_GPIO_PIN_6);
-    HAL_SPI_Transmit_DMA(&hspi1, tx_buffer, frame_length);      
+    if( s->bytes_written > 0 )
+    {
+      uint8_t frame_length = s->buffer_body[s->head]; // get the frame length, it's located at the beginning of new frame in the buffer
+      if( frame_length > s->bytes_written )
+      {
+        // buffer is corrupted
+        Error_Handler();
+      }
+      
+      /*
+      if( frame_length != 13 )
+      {
+        Error_Handler();
+      }
+      */
+      
+      read_buffer( s, tx_buffer, frame_length);
+      
+      LL_GPIO_SetOutputPin(GPIOD, LL_GPIO_PIN_6);
+      HAL_SPI_Transmit_DMA(&hspi1, tx_buffer, frame_length);      
+    }
   }
   
   return 0;
 }
-
 
 uint8_t write_can_frame(buffer_instance * s, uint8_t src_bus, FDCAN_RxHeaderTypeDef * head, uint8_t *data)
 {
@@ -990,6 +1001,7 @@ uint8_t read_can_frame(buffer_instance * s, FDCAN_TxHeaderTypeDef * head, uint8_
   
   return 0;
 }
+
 /* USER CODE END 4 */
 
 /* MPU Configuration */
