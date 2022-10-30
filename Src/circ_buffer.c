@@ -84,7 +84,7 @@ uint8_t read_buffer(buffer_instance * s, uint8_t * local_buffer, uint16_t num_to
 uint16_t update_index( uint16_t index, uint16_t buffer_size, uint16_t shift)
 {
   uint16_t local_head = index + shift;
-  if( local_head > buf_size )
+  if( local_head >= buf_size )
   {
       local_head -= buf_size;
   }
