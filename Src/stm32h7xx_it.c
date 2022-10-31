@@ -48,6 +48,11 @@
 int16_t new_packet_start_index = 0;
 
 volatile uint32_t GPIO_counter = 0;
+
+uint16_t saved_dma_level = 0;
+volatile uint32_t EXTI_counter = 0;
+
+extern buffer_instance sobaka;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -216,6 +221,29 @@ void SysTick_Handler(void)
 void EXTI0_IRQHandler(void)
 {
   /* USER CODE BEGIN EXTI0_IRQn 0 */
+  
+  if( __HAL_GPIO_EXTI_GET_IT(GPIO_PIN_0) )
+  {
+    EXTI_counter++;
+    
+    // get the current DMA buffer counter
+    
+    uint16_t current_dma_level = buf_size - __HAL_DMA_GET_COUNTER(&hdma_spi3_rx);
+    
+    int16_t packet_length = current_dma_level - saved_dma_level;
+    
+    if( packet_length < 0 )
+    {
+      packet_length += buf_size;
+    }
+    
+    sobaka.tail = current_dma_level;
+    sobaka.bytes_written += packet_length;
+    
+    saved_dma_level = current_dma_level;
+  }
+  
+  /*
   // is it signal from the master MCU?
   if( __HAL_GPIO_EXTI_GET_IT(GPIO_PIN_0) )
   {
@@ -254,6 +282,7 @@ void EXTI0_IRQHandler(void)
   {
     //the fuck?!
   }
+*/
   /* USER CODE END EXTI0_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_0);
   /* USER CODE BEGIN EXTI0_IRQn 1 */

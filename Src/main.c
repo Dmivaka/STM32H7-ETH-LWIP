@@ -62,19 +62,52 @@ TIM_HandleTypeDef htim1;
 uint8_t FDCAN1_TX_buf[buf_size] = {0};
 buffer_instance FDCAN1_TX_ins = {0, NULL, 0, FDCAN1_TX_buf};
 
+uint8_t FDCAN1_RX_buf[buf_size] = {0};
+buffer_instance FDCAN1_RX_ins = {0, NULL, 0, FDCAN1_RX_buf};
+
 uint8_t FDCAN2_TX_buf[buf_size] = {0};
 buffer_instance FDCAN2_TX_ins = {0, NULL, 0, FDCAN2_TX_buf};
+
+uint8_t FDCAN2_RX_buf[buf_size] = {0};
+buffer_instance FDCAN2_RX_ins = {0, NULL, 0, FDCAN2_RX_buf};
 
 uint8_t FDCAN3_TX_buf[buf_size] = {0};
 buffer_instance FDCAN3_TX_ins = {0, NULL, 0, FDCAN3_TX_buf};
 
+uint8_t FDCAN3_RX_buf[buf_size] = {0};
+buffer_instance FDCAN3_RX_ins = {0, NULL, 0, FDCAN3_RX_buf};
+
+uint8_t FDCAN4_TX_buf[buf_size] = {0};
+buffer_instance FDCAN4_TX_ins = {0, NULL, 0, FDCAN4_TX_buf};
+
+uint8_t FDCAN4_RX_buf[buf_size] = {0};
+buffer_instance FDCAN4_RX_ins = {0, NULL, 0, FDCAN4_RX_buf};
+
+uint8_t FDCAN5_TX_buf[buf_size] = {0};
+buffer_instance FDCAN5_TX_ins = {0, NULL, 0, FDCAN5_TX_buf};
+
+uint8_t FDCAN5_RX_buf[buf_size] = {0};
+buffer_instance FDCAN5_RX_ins = {0, NULL, 0, FDCAN5_RX_buf};
+
+uint8_t FDCAN6_TX_buf[buf_size] = {0};
+buffer_instance FDCAN6_TX_ins = {0, NULL, 0, FDCAN6_TX_buf};
+
+uint8_t FDCAN6_RX_buf[buf_size] = {0};
+buffer_instance FDCAN6_RX_ins = {0, NULL, 0, FDCAN6_RX_buf};
+
 FDCAN_HandleTypeDef * FDCAN_Handles_Map[3] = {&hfdcan1, &hfdcan2, &hfdcan3};
 buffer_instance * TX_Buffers_Map[3] = { &FDCAN1_TX_ins, &FDCAN2_TX_ins, &FDCAN3_TX_ins};
+buffer_instance * RX_Buffers_Map[3] = { &FDCAN1_RX_ins, &FDCAN2_RX_ins, &FDCAN3_RX_ins};
+
+buffer_instance * Ext_TX_Buffers_Map[3] = { &FDCAN3_TX_ins, &FDCAN4_TX_ins, &FDCAN5_TX_ins};
+buffer_instance * Ext_RX_Buffers_Map[3] = { &FDCAN3_RX_ins, &FDCAN4_RX_ins, &FDCAN5_RX_ins};
 
 #pragma location=0x30005000
 uint8_t tx_buffer[512] = {0};
 #pragma location=0x30005200
-uint8_t rx_buffer[512] = {0};
+uint8_t rx_buffer[1024] = {0};
+
+buffer_instance sobaka = {0, NULL, 0, rx_buffer};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -107,6 +140,10 @@ uint16_t bus1_frames_stored = 0;
 
 extern uint8_t companion_TX_buf[buf_size];
 extern buffer_instance companion_TX_ins;
+
+uint8_t debug_buf[128] = {0};
+
+uint32_t previos_char = 9000;
 /* USER CODE END 0 */
 
 /**
@@ -189,7 +226,7 @@ int main(void)
   MX_SPI1_Init();
   MX_SPI3_Init();
   /* USER CODE BEGIN 2 */
-  HAL_SPI_Receive_DMA(&hspi3, rx_buffer, buf_size);
+  HAL_SPI_Receive_DMA(&hspi3, rx_buffer, 1024);
   
   for( int i = 0; i < 512; i++)
   {
@@ -299,6 +336,30 @@ int main(void)
       udp_client_send();
       timer_update_flag = 0;
     }
+    
+    while( sobaka.bytes_written > 0 )
+    {
+      uint8_t frame_length = sobaka.buffer_body[sobaka.head]; // get the frame length, it's located at the beginning of new frame in the buffer
+      if( frame_length > sobaka.bytes_written )
+      {
+        // buffer is corrupted
+        Error_Handler();
+      }
+      
+      if( frame_length != 13 )
+      {
+        Error_Handler();
+      }
+
+      read_buffer( &sobaka, debug_buf, frame_length);
+      
+      if( previos_char == debug_buf[10] )
+      {
+        Error_Handler();
+      }
+      previos_char = debug_buf[10];
+    }
+
   }
   /* USER CODE END 3 */
 }
@@ -769,7 +830,7 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : PD0 */
   GPIO_InitStruct.Pin = GPIO_PIN_0;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
@@ -797,57 +858,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   }
 }
 
-void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
-{
-  FDCAN_RxHeaderTypeDef RxHeader = {0};
-  uint8_t RxData[64];
-  uint8_t bus = 0;
-
-  HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &RxHeader, RxData);
-  
-  /*
-  FDCAN_RxHeaderTypeDef RxHeader = {0};
-  uint8_t RxData[64];
-  uint8_t bus = 0;
-
-  if( hfdcan->Instance == FDCAN1 )
-  {
-    bus = 1;
-    // Retrieve message from Rx FIFO 0 
-    if (HAL_FDCAN_GetRxMessage(&hfdcan1, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK)
-    {
-      Error_Handler();
-    }
-  }
-  else if( hfdcan->Instance == FDCAN2 )
-  {
-    bus = 2;
-    // Retrieve message from Rx FIFO 0 
-    if (HAL_FDCAN_GetRxMessage(&hfdcan2, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK)
-    {
-      Error_Handler();
-    }
-  }
-  else if( hfdcan->Instance == FDCAN3 )
-  {
-    bus = 3;
-    // Retrieve message from Rx FIFO 0 
-    if (HAL_FDCAN_GetRxMessage(&hfdcan3, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK)
-    {
-      Error_Handler();
-    }
-  }
-  else
-  {
-    Error_Handler();
-  }
-
-  write_can_frame(&gaga, bus, &RxHeader, RxData);  
-  */
-
-  return ;
-}
-
 // https://stackoverflow.com/a/25004214
 uint8_t findIndex(FDCAN_HandleTypeDef *array, size_t size, FDCAN_HandleTypeDef* target) 
 {
@@ -857,7 +867,23 @@ uint8_t findIndex(FDCAN_HandleTypeDef *array, size_t size, FDCAN_HandleTypeDef* 
     return (i<size) ? (i) : (-1);
 }
 
-uint8_t local_buffer[69] = {0};
+void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
+{
+  // this callback shouldnt be called fof disabled CAN buses, so no need to check for NULL pointer
+  
+  // find bus number from the handle name 
+  uint8_t bus_num = findIndex(*FDCAN_Handles_Map, 3, hfdcan);
+  buffer_instance *RX_buffer = RX_Buffers_Map[bus_num];
+  
+  FDCAN_RxHeaderTypeDef RxHeader = {0};
+  uint8_t RxData[64];
+  
+  if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK){ Error_Handler(); }
+  
+  write_can_frame(RX_buffer, bus_num, &RxHeader, RxData);  
+  
+  return ;
+}
 
 void HAL_FDCAN_TxFifoEmptyCallback(FDCAN_HandleTypeDef *hfdcan)
 {
@@ -871,6 +897,8 @@ void HAL_FDCAN_TxFifoEmptyCallback(FDCAN_HandleTypeDef *hfdcan)
   while( free_level != 0 && TX_buffer->bytes_written > 0 )
   {
     uint8_t full_frame_length = TX_buffer->buffer_body[TX_buffer->head]; // the length of the frame is stored in it's head
+    
+    uint8_t local_buffer[69] = {0};
     
     // this code can be interrupted only by other CAN periph blocks so no need of critical section. 
     if( read_buffer(TX_buffer, local_buffer, full_frame_length) )
