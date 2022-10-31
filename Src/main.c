@@ -141,9 +141,10 @@ uint16_t bus1_frames_stored = 0;
 extern uint8_t companion_TX_buf[buf_size];
 extern buffer_instance companion_TX_ins;
 
-uint8_t debug_buf[128] = {0};
-
 uint32_t previos_char = 9000;
+
+uint8_t smotritel[1024] = {0};
+uint32_t s4itatel = 0;
 /* USER CODE END 0 */
 
 /**
@@ -345,19 +346,43 @@ int main(void)
         // buffer is corrupted
         Error_Handler();
       }
+
+      uint32_t primask_bit = __get_PRIMASK();  // backup PRIMASK bit
+      __disable_irq();                  // Disable all interrupts by setting PRIMASK bit on Cortex
+        uint8_t local_buffer[69] = {0};
+        read_buffer(&sobaka, local_buffer, frame_length);
+      __set_PRIMASK(primask_bit);     // Restore PRIMASK bit
       
+      uint32_t bus_id = 0;
+      memcpy(&bus_id, &local_buffer[1], 4);
+      uint8_t bus_num = decode_bus_num( bus_id );
+      
+      if( bus_num < 3 || bus_num > 5 )
+      {
+        Error_Handler();
+      }
+
+      buffer_instance *RX_buffer = Ext_RX_Buffers_Map[bus_num - 3];
+
+      write_buffer(RX_buffer, local_buffer, frame_length); // write message length
+
       if( frame_length != 13 )
       {
         Error_Handler();
       }
 
-      read_buffer( &sobaka, debug_buf, frame_length);
-      
-      if( previos_char == debug_buf[10] )
+      if( previos_char == local_buffer[10] )
       {
         Error_Handler();
       }
-      previos_char = debug_buf[10];
+      previos_char = local_buffer[10];
+      
+      smotritel[s4itatel] = previos_char;
+      s4itatel++;
+      if( s4itatel > 1023 )
+      {
+        s4itatel = 0;
+      }
     }
 
   }
