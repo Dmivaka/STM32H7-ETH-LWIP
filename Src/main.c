@@ -99,8 +99,8 @@ FDCAN_HandleTypeDef * FDCAN_Handles_Map[3] = {&hfdcan1, &hfdcan2, &hfdcan3};
 buffer_instance * TX_Buffers_Map[3] = { &FDCAN1_TX_ins, &FDCAN2_TX_ins, &FDCAN3_TX_ins};
 buffer_instance * RX_Buffers_Map[3] = { &FDCAN1_RX_ins, &FDCAN2_RX_ins, &FDCAN3_RX_ins};
 
-buffer_instance * Ext_TX_Buffers_Map[3] = { &FDCAN3_TX_ins, &FDCAN4_TX_ins, &FDCAN5_TX_ins};
-buffer_instance * Ext_RX_Buffers_Map[3] = { &FDCAN3_RX_ins, &FDCAN4_RX_ins, &FDCAN5_RX_ins};
+buffer_instance * Ext_TX_Buffers_Map[3] = { &FDCAN4_TX_ins, &FDCAN5_TX_ins, &FDCAN6_TX_ins};
+buffer_instance * Ext_RX_Buffers_Map[3] = { &FDCAN4_RX_ins, &FDCAN5_RX_ins, &FDCAN6_RX_ins};
 
 #pragma location=0x30005000
 uint8_t tx_buffer[512] = {0};
@@ -145,6 +145,9 @@ uint32_t previos_char = 9000;
 
 uint8_t smotritel[1024] = {0};
 uint32_t s4itatel = 0;
+
+uint8_t posos[1024] = {0};
+buffer_instance posos_ins = {0, NULL, 0, posos};
 /* USER CODE END 0 */
 
 /**
@@ -337,32 +340,67 @@ int main(void)
       udp_client_send();
       timer_update_flag = 0;
     }
-    
+
+    if( FDCAN1_RX_ins.bytes_written || 
+        FDCAN2_RX_ins.bytes_written ||
+        FDCAN3_RX_ins.bytes_written ||
+        FDCAN4_RX_ins.bytes_written ||
+        FDCAN5_RX_ins.bytes_written ||
+        FDCAN6_RX_ins.bytes_written )
+    {
+      for( int i = 0; i < 3; i++ )
+      {
+        uint8_t pidor[8192] = {0};
+        uint16_t length = 0;
+        
+        buffer_instance * buffer = RX_Buffers_Map[i];
+        
+        
+        while( buffer->bytes_written > 0 )
+        {
+          length = buffer->bytes_written;
+          read_buffer(buffer, pidor, length);
+          write_buffer(&posos_ins, pidor, length);
+        }
+        
+        buffer = Ext_RX_Buffers_Map[i];
+
+        while( buffer->bytes_written > 0 )
+        {
+          length = buffer->bytes_written;
+          read_buffer(buffer, pidor, length);
+          write_buffer(&posos_ins, pidor, length);
+        }
+      }
+    }
+
     while( sobaka.bytes_written > 0 )
     {
-      uint8_t frame_length = sobaka.buffer_body[sobaka.head]; // get the frame length, it's located at the beginning of new frame in the buffer
-      if( frame_length > sobaka.bytes_written )
-      {
-        // buffer is corrupted
-        Error_Handler();
-      }
-
       uint32_t primask_bit = __get_PRIMASK();  // backup PRIMASK bit
       __disable_irq();                  // Disable all interrupts by setting PRIMASK bit on Cortex
+      
+        uint8_t frame_length = sobaka.buffer_body[sobaka.head]; // get the frame length, it's located at the beginning of new frame in the buffer
+        if( frame_length > sobaka.bytes_written )
+        {
+          // buffer is corrupted
+          Error_Handler();
+        }
+
         uint8_t local_buffer[69] = {0};
         read_buffer(&sobaka, local_buffer, frame_length);
+        
       __set_PRIMASK(primask_bit);     // Restore PRIMASK bit
       
       uint32_t bus_id = 0;
       memcpy(&bus_id, &local_buffer[1], 4);
       uint8_t bus_num = decode_bus_num( bus_id );
       
-      if( bus_num < 3 || bus_num > 5 )
+      if( bus_num > 2 )
       {
         Error_Handler();
       }
 
-      buffer_instance *RX_buffer = Ext_RX_Buffers_Map[bus_num - 3];
+      buffer_instance *RX_buffer = Ext_RX_Buffers_Map[bus_num];
 
       write_buffer(RX_buffer, local_buffer, frame_length); // write message length
 
