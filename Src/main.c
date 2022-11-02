@@ -152,6 +152,13 @@ uint32_t s4itatel = 0;
 
 uint8_t posos[1024] = {0};
 buffer_instance posos_ins = {0, NULL, 0, posos};
+
+uint8_t pidor[8192] = {0};
+
+extern struct udp_pcb *upcb;
+
+uint16_t index = 0;
+uint8_t udp_out_buffer[512] = {0};  
 /* USER CODE END 0 */
 
 /**
@@ -334,6 +341,8 @@ int main(void)
     }
     
     MX_LWIP_Process();
+    
+    /*
     if( gaga.bytes_written > 70 )
     {
       udp_client_send();
@@ -344,6 +353,7 @@ int main(void)
       udp_client_send();
       timer_update_flag = 0;
     }
+    */
 
     // filtration of incoming packets into LCM related and others, filling of UDP buffers(?)
     if( FDCAN1_RX_ins.bytes_written || 
@@ -355,7 +365,6 @@ int main(void)
     {
       for( int i = 0; i < 3; i++ )
       {
-        uint8_t pidor[8192] = {0};
         uint16_t length = 0;
         
         buffer_instance * buffer = RX_Buffers_Map[i];
@@ -374,6 +383,29 @@ int main(void)
           length = buffer->bytes_written;
           read_buffer(buffer, pidor, length);
           write_buffer(&posos_ins, pidor, length);
+        }
+      }
+
+      while( posos_ins.bytes_written > 0 )
+      {
+        uint16_t length = posos_ins.buffer_body[posos_ins.head];
+        if( index + length < 512 )
+        {
+           read_buffer(&posos_ins, &udp_out_buffer[index], length);
+           index += length;
+        }
+        else
+        {
+          //send buffer
+          struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, index, PBUF_RAM); // allocate LWIP memory for outgoing UDP packet
+          
+          if (p != NULL)
+          {
+            pbuf_take(p, (void *) udp_out_buffer, index);
+            udp_send(upcb, p);
+            pbuf_free(p);         
+            index = 0;
+          }
         }
       }
     }

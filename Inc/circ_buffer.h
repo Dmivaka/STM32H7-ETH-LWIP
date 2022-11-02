@@ -6,7 +6,7 @@ extern "C" {
 #endif
 
 #include <stdint.h>
-#define buf_size 8192
+#define buf_size 1024
 
 typedef struct buffer_instance
 {
