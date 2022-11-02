@@ -29,6 +29,9 @@
 
 #include "stm32h7xx_ll_gpio.h"
 #include "stm32h7xx_ll_spi.h"
+
+#include "lwip.h"
+#include "lwip/udp.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -102,9 +105,10 @@ buffer_instance * RX_Buffers_Map[3] = { &FDCAN1_RX_ins, &FDCAN2_RX_ins, &FDCAN3_
 buffer_instance * Ext_TX_Buffers_Map[3] = { &FDCAN4_TX_ins, &FDCAN5_TX_ins, &FDCAN6_TX_ins};
 buffer_instance * Ext_RX_Buffers_Map[3] = { &FDCAN4_RX_ins, &FDCAN5_RX_ins, &FDCAN6_RX_ins};
 
-#pragma location=0x30005000
+// the upper two kbytes of SRAM2 region
+#pragma location=0x30007800
 uint8_t tx_buffer[512] = {0};
-#pragma location=0x30005200
+#pragma location=0x30007C00
 uint8_t rx_buffer[1024] = {0};
 
 buffer_instance sobaka = {0, NULL, 0, rx_buffer};
@@ -341,6 +345,7 @@ int main(void)
       timer_update_flag = 0;
     }
 
+    // filtration of incoming packets into LCM related and others, filling of UDP buffers(?)
     if( FDCAN1_RX_ins.bytes_written || 
         FDCAN2_RX_ins.bytes_written ||
         FDCAN3_RX_ins.bytes_written ||
@@ -354,7 +359,6 @@ int main(void)
         uint16_t length = 0;
         
         buffer_instance * buffer = RX_Buffers_Map[i];
-        
         
         while( buffer->bytes_written > 0 )
         {
@@ -374,6 +378,7 @@ int main(void)
       }
     }
 
+    // parsing of packets received via UDP into separate buffers
     while( sobaka.bytes_written > 0 )
     {
       uint32_t primask_bit = __get_PRIMASK();  // backup PRIMASK bit
