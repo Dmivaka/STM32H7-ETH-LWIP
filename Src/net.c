@@ -145,17 +145,17 @@ void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const
       debug_counter++;
       // SPI transfer section. 
       // There's at least one frame ready to be processed. 
-      // If no SPI transfers (1st frame in series), load it directly into the SPI FIFO.
+      // If no outgoing SPI transfers happens (1st frame in series), load it directly into the SPI FIFO.
       
-      uint32_t primask_bit = __get_PRIMASK();  // backup PRIMASK bit
-      __disable_irq();                  // Disable all interrupts by setting PRIMASK bit on Cortex
+      uint32_t primask_bit = __get_PRIMASK();   // backup PRIMASK bit
+      __disable_irq();                          // Disable all interrupts by setting PRIMASK bit on Cortex
         // while we are accessing the buffer the SPI interrupt can occur - it will corrupt it. 
         write_buffer(&companion_TX_ins, &data[index], can_frame_length); // write message length
-      __set_PRIMASK(primask_bit);     // Restore PRIMASK bit
+      __set_PRIMASK(primask_bit);               // Restore PRIMASK bit
       
       if( !LL_SPI_IsActiveMasterTransfer(SPI1) )
       {
-        push_udp_frame();
+        send_frame_SPI();
       }
     }
 

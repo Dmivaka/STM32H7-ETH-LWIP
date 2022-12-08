@@ -32,6 +32,9 @@
 
 #include "lwip.h"
 #include "lwip/udp.h"
+
+#include "libcanard/canard.h"
+#include "uavcan/node/Heartbeat_1_0.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -63,56 +66,38 @@ TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim7;
 
 /* USER CODE BEGIN PV */
-uint8_t FDCAN1_TX_buf[buf_size] = {0};
-buffer_instance FDCAN1_TX_ins = {0, NULL, 0, FDCAN1_TX_buf};
+uint8_t FDCAN1_TX_body[buf_size] = {0};
+buffer_instance FDCAN1_TX_buf = {0, NULL, 0, FDCAN1_TX_body};
 
-uint8_t FDCAN1_RX_buf[buf_size] = {0};
-buffer_instance FDCAN1_RX_ins = {0, NULL, 0, FDCAN1_RX_buf};
+uint8_t FDCAN1_RX_body[buf_size] = {0};
+buffer_instance FDCAN1_RX_buf = {0, NULL, 0, FDCAN1_RX_body};
 
-uint8_t FDCAN2_TX_buf[buf_size] = {0};
-buffer_instance FDCAN2_TX_ins = {0, NULL, 0, FDCAN2_TX_buf};
+uint8_t FDCAN2_TX_body[buf_size] = {0};
+buffer_instance FDCAN2_TX_buf = {0, NULL, 0, FDCAN2_TX_body};
 
-uint8_t FDCAN2_RX_buf[buf_size] = {0};
-buffer_instance FDCAN2_RX_ins = {0, NULL, 0, FDCAN2_RX_buf};
+uint8_t FDCAN2_RX_body[buf_size] = {0};
+buffer_instance FDCAN2_RX_buf = {0, NULL, 0, FDCAN2_RX_body};
 
-uint8_t FDCAN3_TX_buf[buf_size] = {0};
-buffer_instance FDCAN3_TX_ins = {0, NULL, 0, FDCAN3_TX_buf};
+uint8_t FDCAN3_TX_body[buf_size] = {0};
+buffer_instance FDCAN3_TX_buf = {0, NULL, 0, FDCAN3_TX_body};
 
-uint8_t FDCAN3_RX_buf[buf_size] = {0};
-buffer_instance FDCAN3_RX_ins = {0, NULL, 0, FDCAN3_RX_buf};
-
-uint8_t FDCAN4_TX_buf[buf_size] = {0};
-buffer_instance FDCAN4_TX_ins = {0, NULL, 0, FDCAN4_TX_buf};
-
-uint8_t FDCAN4_RX_buf[buf_size] = {0};
-buffer_instance FDCAN4_RX_ins = {0, NULL, 0, FDCAN4_RX_buf};
-
-uint8_t FDCAN5_TX_buf[buf_size] = {0};
-buffer_instance FDCAN5_TX_ins = {0, NULL, 0, FDCAN5_TX_buf};
-
-uint8_t FDCAN5_RX_buf[buf_size] = {0};
-buffer_instance FDCAN5_RX_ins = {0, NULL, 0, FDCAN5_RX_buf};
-
-uint8_t FDCAN6_TX_buf[buf_size] = {0};
-buffer_instance FDCAN6_TX_ins = {0, NULL, 0, FDCAN6_TX_buf};
-
-uint8_t FDCAN6_RX_buf[buf_size] = {0};
-buffer_instance FDCAN6_RX_ins = {0, NULL, 0, FDCAN6_RX_buf};
+uint8_t FDCAN3_RX_body[buf_size] = {0};
+buffer_instance FDCAN3_RX_buf = {0, NULL, 0, FDCAN3_RX_body};
 
 FDCAN_HandleTypeDef * FDCAN_Handles_Map[3] = {&hfdcan1, &hfdcan2, &hfdcan3};
-buffer_instance * TX_Buffers_Map[3] = { &FDCAN1_TX_ins, &FDCAN2_TX_ins, &FDCAN3_TX_ins};
-buffer_instance * RX_Buffers_Map[3] = { &FDCAN1_RX_ins, &FDCAN2_RX_ins, &FDCAN3_RX_ins};
-
-buffer_instance * Ext_TX_Buffers_Map[3] = { &FDCAN4_TX_ins, &FDCAN5_TX_ins, &FDCAN6_TX_ins};
-buffer_instance * Ext_RX_Buffers_Map[3] = { &FDCAN4_RX_ins, &FDCAN5_RX_ins, &FDCAN6_RX_ins};
+buffer_instance * TX_Buffers_Map[3] = { &FDCAN1_TX_buf, &FDCAN2_TX_buf, &FDCAN3_TX_buf};
+buffer_instance * RX_Buffers_Map[3] = { &FDCAN1_RX_buf, &FDCAN2_RX_buf, &FDCAN3_RX_buf};
 
 // the upper two kbytes of SRAM2 region
 #pragma location=0x30007800
-uint8_t tx_buffer[512] = {0};
+uint8_t SPI_TX_buf[512] = {0};
 #pragma location=0x30007C00
-uint8_t rx_buffer[1024] = {0};
+uint8_t SPI_RX_body[1024] = {0};
 
-buffer_instance sobaka = {0, NULL, 0, rx_buffer};
+buffer_instance SPI_RX_buf = {0, NULL, 0, SPI_RX_body};
+
+CanardInstance 	canard;		// This is the core structure that keeps all of the states and allocated resources of the library instance
+CanardTxQueue 	queue;		// Prioritized transmission queue that keeps CAN frames destined for transmission via one CAN interface
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -131,6 +116,11 @@ static void MX_TIM7_Init(void);
 /* USER CODE BEGIN PFP */
 uint8_t write_can_frame(buffer_instance * s, uint8_t src_bus, FDCAN_RxHeaderTypeDef * head, uint8_t *data);
 uint8_t read_can_frame(buffer_instance * s, FDCAN_TxHeaderTypeDef * head, uint8_t *data);
+
+static void *memAllocate(CanardInstance *const canard, const size_t amount);
+static void memFree(CanardInstance *const canard, void *const pointer);
+
+void process_vb_rx_frame(uint8_t *local_buffer, uint8_t frame_length);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -140,9 +130,6 @@ uint64_t micros()
 { 
   return (uint64_t)(__HAL_TIM_GET_COUNTER(&htim7) + 50000u * TIM7_ITs);
 }
-
-uint8_t dummy_buffer[32] = {0};
-uint8_t more_dummy_buffer[128] = {0};
 
 buffer_instance gaga = {0, NULL, 0, NULL};
 uint8_t my_buffer[buf_size] = {0};
@@ -176,6 +163,8 @@ uint8_t udp_out_buffer[512] = {0};
 int main(void)
 {
   /* USER CODE BEGIN 1 */
+  canard = canardInit(&memAllocate, &memFree);	// Initialization of a canard instance
+  canard.node_id = 40;
   
   // bind uint8_t arrays to each circular buffer instance
   
@@ -250,11 +239,11 @@ int main(void)
   MX_SPI3_Init();
   MX_TIM7_Init();
   /* USER CODE BEGIN 2 */
-  HAL_SPI_Receive_DMA(&hspi3, rx_buffer, 1024);
+  HAL_SPI_Receive_DMA(&hspi3, SPI_RX_body, 1024);
   
   for( int i = 0; i < 512; i++)
   {
-    tx_buffer[i] = i;
+    SPI_TX_buf[i] = i;
   }
 
   udp_client_connect();
@@ -269,12 +258,12 @@ int main(void)
   
   // Filter for messages from master to this dedicated device. 
   FDCAN_FilterTypeDef sFilterConfig;  
-  sFilterConfig.IdType = FDCAN_STANDARD_ID;
+  sFilterConfig.IdType = FDCAN_EXTENDED_ID;
   sFilterConfig.FilterIndex = 0;
   sFilterConfig.FilterType = FDCAN_FILTER_RANGE;
   sFilterConfig.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
   sFilterConfig.FilterID1 = 0x0;
-  sFilterConfig.FilterID2 = 0x7FF;  
+  sFilterConfig.FilterID2 = 0x1FFFFFFF;  
   
   // iterate over three CAN bus handles and enable their parameters
   for( int i = 0; i < 3; i++)
@@ -295,7 +284,7 @@ int main(void)
       if( HAL_FDCAN_EnableTxDelayCompensation(FDCAN_Handle) != HAL_OK){ Error_Handler(); }
       
       // Activate Rx FIFO 0 new message notification
-      if( HAL_FDCAN_ActivateNotification(FDCAN_Handle, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK ){ Error_Handler(); }      
+      //if( HAL_FDCAN_ActivateNotification(FDCAN_Handle, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK ){ Error_Handler(); }      
       
       // Activate TX FIFO empty notification
       if( HAL_FDCAN_ActivateNotification( FDCAN_Handle, 
@@ -332,7 +321,15 @@ int main(void)
   else
   {
 
-  }  
+  }
+  
+  CanardRxSubscription heartbeat_msg_subscription;
+  if( canardRxSubscribe(        &canard,
+                                CanardTransferKindMessage,
+                                uavcan_node_Heartbeat_1_0_FIXED_PORT_ID_,
+                                uavcan_node_Heartbeat_1_0_EXTENT_BYTES_,
+                                CANARD_DEFAULT_TRANSFER_ID_TIMEOUT_USEC,
+                                &heartbeat_msg_subscription) != 1 ){ Error_Handler(); }  
 
   /* USER CODE END 2 */
 
@@ -347,7 +344,7 @@ int main(void)
     if( HAL_GetTick() > timestamp )
     {
       //LL_GPIO_SetOutputPin(GPIOD, LL_GPIO_PIN_6);
-      //HAL_SPI_Transmit_DMA(&hspi1, tx_buffer, 512);
+      //HAL_SPI_Transmit_DMA(&hspi1, SPI_TX_buf, 512);
       timestamp += 1000;
     }
     
@@ -365,93 +362,51 @@ int main(void)
       timer_update_flag = 0;
     }
     */
+    
 
-    // filtration of incoming packets into LCM related and others, filling of UDP buffers(?)
-    if( FDCAN1_RX_ins.bytes_written || 
-        FDCAN2_RX_ins.bytes_written ||
-        FDCAN3_RX_ins.bytes_written ||
-        FDCAN4_RX_ins.bytes_written ||
-        FDCAN5_RX_ins.bytes_written ||
-        FDCAN6_RX_ins.bytes_written )
+    FDCAN_RxHeaderTypeDef RxHeader = {0};
+    uint8_t RxData[64];
+    
+    while( HAL_FDCAN_GetRxFifoFillLevel(&hfdcan1, FDCAN_RX_FIFO0) > 0 )
     {
-      for( int i = 0; i < 3; i++ )
-      {
-        uint16_t length = 0;
-        
-        buffer_instance * buffer = RX_Buffers_Map[i];
-        
-        while( buffer->bytes_written > 0 )
-        {
-          length = buffer->bytes_written;
-          read_buffer(buffer, pidor, length);
-          write_buffer(&posos_ins, pidor, length);
-        }
-        
-        buffer = Ext_RX_Buffers_Map[i];
-
-        while( buffer->bytes_written > 0 )
-        {
-          length = buffer->bytes_written;
-          read_buffer(buffer, pidor, length);
-          write_buffer(&posos_ins, pidor, length);
-        }
-      }
-
-      while( posos_ins.bytes_written > 0 )
-      {
-        uint16_t length = posos_ins.buffer_body[posos_ins.head];
-        if( index + length < 512 )
-        {
-           read_buffer(&posos_ins, &udp_out_buffer[index], length);
-           index += length;
-        }
-        else
-        {
-          //send buffer
-          struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, index, PBUF_RAM); // allocate LWIP memory for outgoing UDP packet
-          
-          if (p != NULL)
-          {
-            pbuf_take(p, (void *) udp_out_buffer, index);
-            udp_send(upcb, p);
-            pbuf_free(p);         
-            index = 0;
-          }
-        }
-      }
+      if (HAL_FDCAN_GetRxMessage(&hfdcan1, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK){ Error_Handler(); }
+      write_can_frame(&FDCAN1_RX_buf, 0, &RxHeader, RxData);
+    }
+    
+    while( HAL_FDCAN_GetRxFifoFillLevel(&hfdcan2, FDCAN_RX_FIFO0) > 0 )
+    {
+      if (HAL_FDCAN_GetRxMessage(&hfdcan2, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK){ Error_Handler(); }
+      write_can_frame(&FDCAN2_RX_buf, 1, &RxHeader, RxData);
     }
 
-    // parsing of packets received via UDP into separate buffers
-    while( sobaka.bytes_written > 0 )
+    while( HAL_FDCAN_GetRxFifoFillLevel(&hfdcan3, FDCAN_RX_FIFO0) > 0 )
     {
+      if (HAL_FDCAN_GetRxMessage(&hfdcan3, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK){ Error_Handler(); }
+      write_can_frame(&FDCAN3_RX_buf, 2, &RxHeader, RxData);
+    }
+
+    /// processing of the received FDCAN frames from companion (via SPI) chip
+    while( SPI_RX_buf.bytes_written > 0 )
+    {
+      uint8_t local_buffer[69] = {0};
+      uint8_t frame_length = 0;
+      
       uint32_t primask_bit = __get_PRIMASK();  // backup PRIMASK bit
       __disable_irq();                  // Disable all interrupts by setting PRIMASK bit on Cortex
       
-        uint8_t frame_length = sobaka.buffer_body[sobaka.head]; // get the frame length, it's located at the beginning of new frame in the buffer
-        if( frame_length > sobaka.bytes_written )
+        frame_length = SPI_RX_buf.buffer_body[SPI_RX_buf.head]; // get the frame length, it's located at the beginning of new frame in the buffer
+        if( frame_length > SPI_RX_buf.bytes_written )
         {
           // buffer is corrupted
           Error_Handler();
         }
-
-        uint8_t local_buffer[69] = {0};
-        read_buffer(&sobaka, local_buffer, frame_length);
+        read_buffer(&SPI_RX_buf, local_buffer, frame_length);
         
       __set_PRIMASK(primask_bit);     // Restore PRIMASK bit
       
-      uint32_t bus_id = 0;
-      memcpy(&bus_id, &local_buffer[1], 4);
-      uint8_t bus_num = decode_bus_num( bus_id );
-      
-      if( bus_num > 2 )
-      {
-        Error_Handler();
-      }
+      process_vb_rx_frame(local_buffer, frame_length); // filter frames into the LCM and UAVCAN -related buffers
 
-      buffer_instance *RX_buffer = Ext_RX_Buffers_Map[bus_num];
-
-      write_buffer(RX_buffer, local_buffer, frame_length); // write message length
-
+      /// the rest is debug errors check
       if( frame_length != 13 )
       {
         Error_Handler();
@@ -471,6 +426,55 @@ int main(void)
       }
     }
 
+    /// processing of the received FDCAN frames from the main chip
+    // if there's any non-empty RX-buffer
+    if( FDCAN1_RX_buf.bytes_written || FDCAN2_RX_buf.bytes_written || FDCAN3_RX_buf.bytes_written )
+    {
+      for( int i = 0; i < 3; i++ )
+      {
+        buffer_instance * buffer = RX_Buffers_Map[i];
+
+        while( buffer->bytes_written > 0 )
+        {
+          uint8_t local_buffer[69] = {0};
+          uint8_t frame_length = 0;
+
+          frame_length = buffer->buffer_body[buffer->head]; // get the frame length, it's located at the beginning of new frame in the buffer
+          if( frame_length > buffer->bytes_written )
+          {
+            // buffer is corrupted
+            Error_Handler();
+          }
+          read_buffer(buffer, local_buffer, frame_length);
+
+          process_vb_rx_frame(local_buffer, frame_length); // filter frames into the LCM and UAVCAN -related buffers
+        }
+      }
+    }
+
+    // break UDP TX ring buffer into a bunch of UDP frames each smaller than 512 bytes and send them out
+    while( posos_ins.bytes_written > 0 )
+    {
+      uint16_t length = posos_ins.buffer_body[posos_ins.head];
+      if( index + length < 512 )
+      {
+         read_buffer(&posos_ins, &udp_out_buffer[index], length);
+         index += length;
+      }
+      else
+      {
+        //send buffer
+        struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, index, PBUF_RAM); // allocate LWIP memory for outgoing UDP packet
+        
+        if (p != NULL)
+        {
+          pbuf_take(p, (void *) udp_out_buffer, index);
+          udp_send(upcb, p);
+          pbuf_free(p);         
+          index = 0;
+        }
+      }
+    }
   }
   /* USER CODE END 3 */
 }
@@ -593,8 +597,8 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.DataTimeSeg1 = 5;
   hfdcan1.Init.DataTimeSeg2 = 4;
   hfdcan1.Init.MessageRAMOffset = 0;
-  hfdcan1.Init.StdFiltersNbr = 1;
-  hfdcan1.Init.ExtFiltersNbr = 0;
+  hfdcan1.Init.StdFiltersNbr = 0;
+  hfdcan1.Init.ExtFiltersNbr = 1;
   hfdcan1.Init.RxFifo0ElmtsNbr = 32;
   hfdcan1.Init.RxFifo0ElmtSize = FDCAN_DATA_BYTES_64;
   hfdcan1.Init.RxFifo1ElmtsNbr = 0;
@@ -665,8 +669,8 @@ static void MX_FDCAN2_Init(void)
   hfdcan2.Init.DataTimeSeg1 = 5;
   hfdcan2.Init.DataTimeSeg2 = 4;
   hfdcan2.Init.MessageRAMOffset = 768;
-  hfdcan2.Init.StdFiltersNbr = 1;
-  hfdcan2.Init.ExtFiltersNbr = 0;
+  hfdcan2.Init.StdFiltersNbr = 0;
+  hfdcan2.Init.ExtFiltersNbr = 1;
   hfdcan2.Init.RxFifo0ElmtsNbr = 32;
   hfdcan2.Init.RxFifo0ElmtSize = FDCAN_DATA_BYTES_64;
   hfdcan2.Init.RxFifo1ElmtsNbr = 0;
@@ -997,6 +1001,45 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void process_vb_rx_frame(uint8_t *local_buffer, uint8_t frame_length)
+{
+  uint32_t bus_id = 0;
+  memcpy(&bus_id, &local_buffer[1], 4);
+  //uint8_t bus_num = decode_bus_num( bus_id );
+  //if( bus_num > 2 ){ Error_Handler(); } // only for debugging purposes
+
+  CanardFrame rxf;
+
+  rxf.extended_can_id = decode_can_id( bus_id );
+  rxf.payload_size = (size_t)(frame_length - 5);
+  rxf.payload = (void*)&local_buffer[5];
+
+  CanardRxSubscription* out_subscription = NULL;
+  CanardRxTransfer transfer;
+  
+  int8_t result = canardRxAccept(       &canard,
+                                        micros(),
+                                        &rxf,
+                                        0,
+                                        &transfer,
+                                        &out_subscription);
+  
+  if( out_subscription != NULL ) // if we did subscribe to this subject we keep the frame and wait for the completion of transfer
+  {
+    if( result == 1 )
+    {
+      // parse the transfer and load value into the TX LCM message 
+      //if( transfer.metadata.remote_node_id == 1 ) // something happens I quess
+      canard.memory_free(&canard, transfer.payload);      // Deallocate the dynamic memory afterwards.
+    }
+  }
+  else // we did not subscribe to this subject - pass it up
+  {
+    // load frame into the UDP TX buffer
+    write_buffer(&posos_ins, local_buffer, frame_length);
+  }
+}
+
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   if( htim->Instance == TIM1 )
@@ -1014,24 +1057,6 @@ uint8_t findIndex(FDCAN_HandleTypeDef *array, size_t size, FDCAN_HandleTypeDef* 
     while((i<size) && (&array[i] != target)) i++;
 
     return (i<size) ? (i) : (-1);
-}
-
-void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
-{
-  // this callback shouldnt be called fof disabled CAN buses, so no need to check for NULL pointer
-  
-  // find bus number from the handle name 
-  uint8_t bus_num = findIndex(*FDCAN_Handles_Map, 3, hfdcan);
-  buffer_instance *RX_buffer = RX_Buffers_Map[bus_num];
-  
-  FDCAN_RxHeaderTypeDef RxHeader = {0};
-  uint8_t RxData[64];
-  
-  if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK){ Error_Handler(); }
-  
-  write_can_frame(RX_buffer, bus_num, &RxHeader, RxData);  
-  
-  return ;
 }
 
 void HAL_FDCAN_TxFifoEmptyCallback(FDCAN_HandleTypeDef *hfdcan)
@@ -1106,12 +1131,12 @@ void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
 {
   if( hspi->Instance == SPI1 )
   {
-    push_udp_frame();
+    send_frame_SPI();
   }
 }
 
 // push VB CAN frame into CAN FIFO
-uint8_t push_udp_frame(void)
+uint8_t send_frame_SPI(void)
 {
   if( !LL_SPI_IsActiveMasterTransfer(SPI1) )
   {
@@ -1133,10 +1158,10 @@ uint8_t push_udp_frame(void)
       }
       */
       
-      read_buffer( s, tx_buffer, frame_length);
+      read_buffer( s, SPI_TX_buf, frame_length);
       
       LL_GPIO_SetOutputPin(GPIOD, LL_GPIO_PIN_6);
-      HAL_SPI_Transmit_DMA(&hspi1, tx_buffer, frame_length);      
+      HAL_SPI_Transmit_DMA(&hspi1, SPI_TX_buf, frame_length);      
     }
   }
   
@@ -1179,6 +1204,19 @@ uint8_t read_can_frame(buffer_instance * s, FDCAN_TxHeaderTypeDef * head, uint8_
   return 0;
 }
 
+// allocate dynamic memory of desired size in bytes
+static void *memAllocate(CanardInstance *const canard, const size_t amount)
+{
+  (void)canard;
+  return malloc(amount);
+}
+
+// free allocated memory
+static void memFree(CanardInstance *const canard, void *const pointer)
+{
+  (void)canard;
+  free(pointer);
+}
 /* USER CODE END 4 */
 
 /* MPU Configuration */

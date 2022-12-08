@@ -54,7 +54,7 @@ volatile uint32_t GPIO_counter = 0;
 uint16_t saved_dma_level = 0;
 volatile uint32_t EXTI_counter = 0;
 
-extern buffer_instance sobaka;
+extern buffer_instance SPI_RX_buf;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -240,8 +240,8 @@ void EXTI0_IRQHandler(void)
       packet_length += buf_size;
     }
     
-    sobaka.tail = current_dma_level;
-    sobaka.bytes_written += packet_length;
+    SPI_RX_buf.tail = current_dma_level;
+    SPI_RX_buf.bytes_written += packet_length;
     
     saved_dma_level = current_dma_level;
   }
