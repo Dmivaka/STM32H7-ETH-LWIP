@@ -9,15 +9,17 @@
 #include <stdint.h>
 #include "lwip.h"
 #include "lwip/udp.h"
+#include "lwip/igmp.h"
 
 #include "stm32h7xx_ll_spi.h"
 //-----------------------------------------------
 struct udp_pcb *upcb;
-char stringer[78];
 
 #define LOCAL_PORT 1555
 #define REMOTE_PORT 1556
 uint8_t RMT_IP_ADDRESS[4] = {192,168,2,105};
+
+struct udp_pcb *upcb_1;
 
 extern FDCAN_HandleTypeDef * FDCAN_Handles_Map[3];
 extern buffer_instance * TX_Buffers_Map[3];
@@ -38,6 +40,35 @@ void udp_client_connect(void)
     if (err == ERR_OK)
     {
       udp_recv(upcb, udp_receive_callback, NULL);
+    }
+  }
+}
+//-----------------------------------------------
+#pragma optimize s=none
+void lcm_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port)
+{
+  return ;
+}
+//-----------------------------------------------
+void udp_lcm_connect(void)
+{
+  ip_addr_t Multicast_Addr;
+  IP4_ADDR(&Multicast_Addr, 224, 0, 0, 7 ); 
+#if LWIP_IGMP
+    igmp_joingroup(IP_ADDR_ANY,&Multicast_Addr);
+#endif
+    
+  ip_addr_t DestIPaddr;
+  err_t err;
+  upcb_1 = udp_new();
+  if (upcb_1!=NULL)
+  {
+    IP4_ADDR(&DestIPaddr, RMT_IP_ADDRESS[0], RMT_IP_ADDRESS[1], RMT_IP_ADDRESS[2], RMT_IP_ADDRESS[3]);
+    upcb_1->local_port = LOCAL_PORT;
+    err= udp_bind(upcb_1, IP_ADDR_ANY, 1557);
+    if (err == ERR_OK)
+    {
+      udp_recv(upcb_1, lcm_receive_callback, NULL);
     }
   }
 }

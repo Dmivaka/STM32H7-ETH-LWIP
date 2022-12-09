@@ -12,6 +12,7 @@ extern "C" {
 void udp_client_connect(void);
 void TIM1_Callback(void);
 void udp_client_send(void);
+void udp_lcm_connect(void);
 //-----------------------------------------------
 #ifdef __cplusplus
 }

@@ -233,7 +233,10 @@ static void low_level_init(struct netif *netif)
   #endif /* LWIP_ARP */
 
 /* USER CODE BEGIN PHY_PRE_CONFIG */
-
+  ETH_MACFilterConfigTypeDef my_filter = {DISABLE};
+  my_filter.PassAllMulticast = ENABLE;
+  my_filter.PromiscuousMode = ENABLE;
+  HAL_ETH_SetMACFilterConfig(&heth, &my_filter);
 /* USER CODE END PHY_PRE_CONFIG */
   /* Set PHY IO functions */
   LAN8742_RegisterBusIO(&LAN8742, &LAN8742_IOCtx);

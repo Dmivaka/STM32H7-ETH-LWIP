@@ -247,6 +247,7 @@ int main(void)
   }
 
   udp_client_connect();
+  udp_lcm_connect();
   
   HAL_TIM_Base_Start_IT(&htim7); // enable microseconds timesource
   HAL_TIM_Base_Start_IT(&htim1);

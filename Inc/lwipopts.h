@@ -49,6 +49,8 @@
 /* Parameters set in STM32CubeMX LwIP Configuration GUI -*/
 /*----- Default value in ETH configuration GUI in CubeMx: 1524 -----*/
 #define ETH_RX_BUFFER_SIZE 1000
+/*----- Default Value for LWIP_IGMP: 0 ---*/
+#define LWIP_IGMP 1
 /*----- Value in opt.h for LWIP_TCP: 1 -----*/
 #define LWIP_TCP 0
 /*----- Value in opt.h for NO_SYS: 0 -----*/
