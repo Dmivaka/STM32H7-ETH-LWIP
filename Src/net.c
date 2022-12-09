@@ -12,8 +12,12 @@
 #include "lwip/igmp.h"
 
 #include "stm32h7xx_ll_spi.h"
+
+#include "lcmlite.h"
 //-----------------------------------------------
 struct udp_pcb *upcb;
+
+lcmlite_t lcm;
 
 #define LOCAL_PORT 1555
 #define REMOTE_PORT 1556
@@ -23,6 +27,18 @@ struct udp_pcb *upcb_1;
 
 extern FDCAN_HandleTypeDef * FDCAN_Handles_Map[3];
 extern buffer_instance * TX_Buffers_Map[3];
+
+char hl_command_charname[] = "EXAMPLE";
+
+static void hl_command_callback(lcmlite_t *lcm, const char *channel, const void *buf, int buf_len, void *user)
+{
+  return ;
+}
+
+void transmit_packet(const void *_buf, int buf_len, void *user)
+{
+  return ;
+}
 
 //-----------------------------------------------
 void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port);
@@ -47,6 +63,11 @@ void udp_client_connect(void)
 #pragma optimize s=none
 void lcm_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port)
 {
+  lcmlite_receive_packet(     &lcm,
+                               p->payload,
+                               p->len,
+                               NULL);
+  
   return ;
 }
 //-----------------------------------------------
@@ -71,6 +92,15 @@ void udp_lcm_connect(void)
       udp_recv(upcb_1, lcm_receive_callback, NULL);
     }
   }
+  
+  lcmlite_init(&lcm, transmit_packet, NULL);
+
+  // subscribe to HL_COMMAND messages
+  lcmlite_subscription_t *sub = malloc(sizeof(lcmlite_subscription_t));
+  sub->channel = hl_command_charname;
+  sub->callback = hl_command_callback;
+  sub->user = NULL;
+  lcmlite_subscribe(&lcm, sub);  
 }
 //-----------------------------------------------
 extern buffer_instance gaga;
