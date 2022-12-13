@@ -346,6 +346,8 @@ int main(void)
     {
       //LL_GPIO_SetOutputPin(GPIOD, LL_GPIO_PIN_6);
       //HAL_SPI_Transmit_DMA(&hspi1, SPI_TX_buf, 512);
+      
+      conke();
       timestamp += 1000;
     }
     

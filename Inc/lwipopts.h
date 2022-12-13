@@ -30,7 +30,17 @@
 
 /* Within 'USER CODE' section, code will be kept by default at each generation */
 /* USER CODE BEGIN 0 */
-//#define LWIP_DEBUG      1
+#define LWIP_MULTICAST_TX_OPTIONS 1
+/*
+#define LWIP_DEBUG      
+#define TCP_DEBUG                       LWIP_DBG_ON
+#define ETHARP_DEBUG                    LWIP_DBG_ON
+#define PBUF_DEBUG                      LWIP_DBG_ON
+#define IP_DEBUG                        LWIP_DBG_ON
+#define TCPIP_DEBUG                     LWIP_DBG_ON
+#define DHCP_DEBUG                      LWIP_DBG_ON
+#define UDP_DEBUG                       LWIP_DBG_ON
+*/
 /* USER CODE END 0 */
 
 #ifdef __cplusplus
