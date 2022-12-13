@@ -164,6 +164,7 @@ void udp_lcm_connect(void)
   {
     upcb_1->local_port = LOCAL_PORT;
     err= udp_bind(upcb_1, IP_ADDR_ANY, 1557);
+    err= udp_connect(upcb_1, &Multicast_Addr, 1557);
     if (err == ERR_OK)
     {
       udp_recv(upcb_1, lcm_receive_callback, NULL);
