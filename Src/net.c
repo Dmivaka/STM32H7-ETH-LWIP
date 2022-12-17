@@ -96,6 +96,7 @@ void conke(void)
   lcmlite_publish(&lcm, "UPSTREAM", &lcm_tx_buf, sizeof(tx_lcm_msg) + 8);
 }
 
+ip_addr_t Multicast_Addr;
 void transmit_packet(const void *_buf, int buf_len, void *user)
 {
   struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, buf_len, PBUF_RAM); // allocate LWIP memory for outgoing UDP packet
@@ -103,7 +104,8 @@ void transmit_packet(const void *_buf, int buf_len, void *user)
   if (p != NULL)
   {
     pbuf_take(p, (void *) _buf, buf_len);
-    udp_send(upcb_1, p);
+    udp_sendto(upcb_1, p, &Multicast_Addr, 1557);
+    //udp_send(upcb_1, p);
     pbuf_free(p);
   }
   else
@@ -123,7 +125,6 @@ void lcm_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const
 //-----------------------------------------------
 void udp_lcm_connect(void)
 {
-  ip_addr_t Multicast_Addr;
   IP4_ADDR(&Multicast_Addr, 224, 0, 0, 7 ); 
 #if LWIP_IGMP
     igmp_joingroup(IP_ADDR_ANY,&Multicast_Addr);
@@ -135,7 +136,7 @@ void udp_lcm_connect(void)
   {
     upcb_1->local_port = LOCAL_PORT;
     err= udp_bind(upcb_1, IP_ADDR_ANY, 1557);
-    err= udp_connect(upcb_1, &Multicast_Addr, 1557);
+    //err= udp_connect(upcb_1, &Multicast_Addr, 1557);
     if (err == ERR_OK)
     {
       udp_recv(upcb_1, lcm_receive_callback, NULL);
