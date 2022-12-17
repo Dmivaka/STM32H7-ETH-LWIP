@@ -31,7 +31,7 @@ struct udp_pcb *upcb_1;
 extern FDCAN_HandleTypeDef * FDCAN_Handles_Map[3];
 extern buffer_instance * TX_Buffers_Map[3];
 
-char hl_command_charname[] = "UPSTREAM";
+char hl_command_charname[] = "EXAMPLE";
 
 uint8_t LCM_rx_flag = 0;
 
@@ -230,8 +230,13 @@ volatile uint32_t debug_counter = 0;
 
 // this function serves as abstraction layer between application-level can-buses
 // and actual can-hardware on the main or companion chip. 
-void distribute_vb_frame( uint8_t bus_num, uint8_t vb_frame_len, uint8_t * vb_frame)
+void distribute_vb_frame( uint8_t * vb_frame )
 {
+  uint8_t vb_frame_len = vb_frame[0];
+  uint32_t bus_id = 0;
+  memcpy(&bus_id, &vb_frame[1], 4);
+  uint8_t bus_num = decode_bus_num( bus_id );
+  
   if( bus_num < 3 )
   {
     FDCAN_HandleTypeDef * FDCAN_Handle = FDCAN_Handles_Map[bus_num];
@@ -287,16 +292,12 @@ void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const
   
   while( index < packet_length ) // iterate over UDP packet
   {
-    uint32_t bus_id = 0;
-
-    // parse one can frame from the rx UDP packet
-    uint8_t can_frame_length = data[index];
-    memcpy(&bus_id, &data[index+1], 4);
-    uint8_t bus_num = decode_bus_num( bus_id );
+    // parse one vb frame from the rx UDP packet
+    uint8_t vb_frame_length = data[index];
     
-    distribute_vb_frame( bus_num, can_frame_length, &data[index]);
+    distribute_vb_frame( &data[index] );
 
-    index += can_frame_length;
+    index += vb_frame_length;
   }
   
   if( index != packet_length )

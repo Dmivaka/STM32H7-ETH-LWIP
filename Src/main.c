@@ -100,8 +100,18 @@ uint8_t SPI_RX_body[1024] = {0};
 
 buffer_instance SPI_RX_buf = {0, NULL, 0, SPI_RX_body};
 
-CanardInstance 	canard;		// This is the core structure that keeps all of the states and allocated resources of the library instance
-CanardTxQueue 	queue;		// Prioritized transmission queue that keeps CAN frames destined for transmission via one CAN interface
+CanardInstance 	canard; // This is the core structure that keeps all of the states and allocated resources of the library instance
+CanardTxQueue 	queue1; // Prioritized transmission queue that keeps CAN frames destined for transmission via one CAN interface
+CanardTxQueue 	queue2;
+CanardTxQueue 	queue3;
+CanardTxQueue 	queue4;
+CanardTxQueue 	queue5;
+CanardTxQueue 	queue6;
+
+CanardTxQueue * TxQueuesMap[6] = { &queue1, &queue2, &queue3, &queue4, &queue5, &queue6 };
+
+//uint8_t device_to_queue[12] = {1,1,2,2,3,3,4,4,5,5,6,6};
+uint8_t device_to_queue[12] = {1,0,0,0,0,0,0,0,0,0,0,0}; // only 1st driver is enabled and is bound to the 2nd queue (FDCAN2)
 
 extern uint8_t LCM_rx_flag;
 extern hl_command_msg rx_lcm_msg;
@@ -128,7 +138,7 @@ static void *memAllocate(CanardInstance *const canard, const size_t amount);
 static void memFree(CanardInstance *const canard, void *const pointer);
 
 void process_vb_rx_frame(uint8_t *local_buffer, uint8_t frame_length);
-void process_canard_TX_queue(void);
+void process_canard_TX_queue( uint8_t queue_num );
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -352,7 +362,7 @@ int main(void)
       //LL_GPIO_SetOutputPin(GPIOD, LL_GPIO_PIN_6);
       //HAL_SPI_Transmit_DMA(&hspi1, SPI_TX_buf, 512);
       
-      //conke(); // debug transmition of sample data
+      conke(); // debug transmition of sample data
       timestamp += 1000;
     }
     
@@ -360,45 +370,51 @@ int main(void)
     
     if( LCM_rx_flag )
     {
-      uavcan_primitive_array_Real32_1_0 uavcan_tx_array;
-      uavcan_tx_array.value.count = 5;
-      
-      uavcan_tx_array.value.elements[0] = rx_lcm_msg.act[0].position;
-      uavcan_tx_array.value.elements[1] = rx_lcm_msg.act[0].velocity;
-      uavcan_tx_array.value.elements[2] = rx_lcm_msg.act[0].torque;
-      uavcan_tx_array.value.elements[3] = rx_lcm_msg.act[0].kp;
-      uavcan_tx_array.value.elements[4] = rx_lcm_msg.act[0].kd;
-      
       uint8_t c_serialized[uavcan_primitive_array_Real32_1_0_EXTENT_BYTES_] = {0};
       size_t c_serialized_size = sizeof(c_serialized);
-
-      if ( uavcan_primitive_array_Real32_1_0_serialize_( &uavcan_tx_array, c_serialized, &c_serialized_size) < 0)
-      {
-        Error_Handler();
-      }
       
-      const CanardTransferMetadata transfer_metadata = {    .priority       = CanardPriorityHigh,
-                                                            .transfer_kind  = CanardTransferKindMessage,
-                                                            .port_id        = 1000,
-                                                            .remote_node_id = CANARD_NODE_ID_UNSET,
-                                                            .transfer_id    = message_transfer }; 
+      uavcan_primitive_array_Real32_1_0 uavcan_tx_array;
+      uavcan_tx_array.value.count = 5;
+        
+      for( int i = 0; i < 12; i++)
+      {
+        if( device_to_queue[i] != 0 ) // check if selected drive is ebabled 
+        {
+          uavcan_tx_array.value.elements[0] = rx_lcm_msg.act[i].position;
+          uavcan_tx_array.value.elements[1] = rx_lcm_msg.act[i].velocity;
+          uavcan_tx_array.value.elements[2] = rx_lcm_msg.act[i].torque;
+          uavcan_tx_array.value.elements[3] = rx_lcm_msg.act[i].kp;
+          uavcan_tx_array.value.elements[4] = rx_lcm_msg.act[i].kd;
 
-      if(canardTxPush(  &queue,
-                        &canard,
-                        0,
-                        &transfer_metadata,
-                        c_serialized_size,
-                        c_serialized) < 0 )
-                        {
-                          Error_Handler();
-                        }
+          if ( uavcan_primitive_array_Real32_1_0_serialize_( &uavcan_tx_array, c_serialized, &c_serialized_size) < 0)
+          {
+            Error_Handler();
+          }
+          
+          const CanardTransferMetadata transfer_metadata = {    .priority       = CanardPriorityHigh,
+                                                                .transfer_kind  = CanardTransferKindMessage,
+                                                                .port_id        = 1000,
+                                                                .remote_node_id = CANARD_NODE_ID_UNSET,
+                                                                .transfer_id    = message_transfer }; 
+
+          if(canardTxPush(  TxQueuesMap[device_to_queue[i]],
+                            &canard,
+                            0,
+                            &transfer_metadata,
+                            c_serialized_size,
+                            c_serialized) < 0 )
+                            {
+                              Error_Handler();
+                            }
+          
+          process_canard_TX_queue( device_to_queue[i] );
+        }
+      }
       
       message_transfer++ ;
       LCM_rx_flag = 0;
     }
-    
-    process_canard_TX_queue();
-    
+
     /*
     if( gaga.bytes_written > 70 )
     {
@@ -1177,36 +1193,29 @@ uint8_t push_can_frame( FDCAN_HandleTypeDef *handle, uint8_t *frame_data, uint8_
   return 0;
 }
 
-void process_canard_TX_queue(void)
+void process_canard_TX_queue( uint8_t queue_num )
 {
   // Look at top of the TX queue of individual CAN frames
-  for (const CanardTxQueueItem* ti = NULL; (ti = canardTxPeek(&queue)) != NULL;)
+  for (const CanardTxQueueItem* ti = NULL; (ti = canardTxPeek( TxQueuesMap[queue_num] )) != NULL;)
   {
     if ((0U == ti->tx_deadline_usec) || (ti->tx_deadline_usec > micros()))  // Check the deadline.
     {
-      FDCAN_TxHeaderTypeDef TxHeader;
+      uint8_t vb_frame[69];
+      uint8_t vb_frame_len = LengthCoder( ti->frame.payload_size ) + 5;
+      vb_frame[0] = vb_frame_len;
+
+      uint8_t bus_num = queue_num;
       
-      // bullshit
-      if (HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1) != 0)
-      {
-        // Add message to Tx FIFO 
-        TxHeader.Identifier = ti->frame.extended_can_id;
-        TxHeader.IdType = FDCAN_EXTENDED_ID;
-        TxHeader.TxFrameType = FDCAN_DATA_FRAME;
-        TxHeader.DataLength = LengthCoder( ti->frame.payload_size );
-        TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
-        TxHeader.BitRateSwitch = FDCAN_BRS_ON;
-        TxHeader.FDFormat = FDCAN_FD_CAN;
-        TxHeader.TxEventFifoControl = FDCAN_STORE_TX_EVENTS;
-        TxHeader.MessageMarker = 0x00;
-        if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, (uint8_t *)ti->frame.payload) != HAL_OK)
-        {
-          Error_Handler();
-        }
-      }
+      uint32_t id = ti->frame.extended_can_id;
+      uint32_t bus_id = encode_bus_id( bus_num, id );
+      
+      memcpy( &vb_frame[1], &bus_id, 4);
+      memcpy( &vb_frame[6], (uint8_t *)ti->frame.payload, ti->frame.payload_size);
+      
+      distribute_vb_frame( vb_frame );
     }
     // After the frame is transmitted or if it has timed out while waiting, pop it from the queue and deallocate:
-    canard.memory_free(&canard, canardTxPop(&queue, ti));
+    canard.memory_free(&canard, canardTxPop( TxQueuesMap[queue_num], ti));
   }
 }
 

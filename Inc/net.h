@@ -14,6 +14,7 @@ void TIM1_Callback(void);
 void udp_client_send(void);
 void udp_lcm_connect(void);
 void conke(void);
+void distribute_vb_frame( uint8_t * vb_frame );
 //-----------------------------------------------
 #ifdef __cplusplus
 }
