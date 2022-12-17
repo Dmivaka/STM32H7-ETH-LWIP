@@ -180,6 +180,11 @@ int main(void)
   canard = canardInit(&memAllocate, &memFree);	// Initialization of a canard instance
   canard.node_id = 40;
   
+  for( int i = 0; i < 6; i++ )
+  {
+    *TxQueuesMap[i] = canardTxInit( 10, CANARD_MTU_CAN_FD); // really we need 1 element only
+  }
+  
   // bind uint8_t arrays to each circular buffer instance
   
   gaga.buffer_body = my_buffer;
@@ -320,7 +325,7 @@ int main(void)
   {
     // Add message to Tx FIFO 
     TxHeader.Identifier = 0x1;
-    TxHeader.IdType = FDCAN_STANDARD_ID;
+    TxHeader.IdType = FDCAN_EXTENDED_ID;
     TxHeader.TxFrameType = FDCAN_DATA_FRAME;
     TxHeader.DataLength = FDCAN_DLC_BYTES_8;
     TxHeader.ErrorStateIndicator = FDCAN_ESI_PASSIVE;
@@ -1171,7 +1176,7 @@ uint8_t push_can_frame( FDCAN_HandleTypeDef *handle, uint8_t *frame_data, uint8_
     FDCAN_TxHeaderTypeDef TxHeader;
     // Add message to Tx FIFO 
     TxHeader.Identifier = id;
-    TxHeader.IdType = FDCAN_STANDARD_ID;
+    TxHeader.IdType = FDCAN_EXTENDED_ID;
     TxHeader.TxFrameType = FDCAN_DATA_FRAME;
     TxHeader.DataLength = LengthCoder( frame_full_size - 5 );
     TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
@@ -1201,7 +1206,7 @@ void process_canard_TX_queue( uint8_t queue_num )
     if ((0U == ti->tx_deadline_usec) || (ti->tx_deadline_usec > micros()))  // Check the deadline.
     {
       uint8_t vb_frame[69];
-      uint8_t vb_frame_len = LengthCoder( ti->frame.payload_size ) + 5;
+      uint8_t vb_frame_len = ti->frame.payload_size + 5;
       vb_frame[0] = vb_frame_len;
 
       uint8_t bus_num = queue_num;
@@ -1210,7 +1215,7 @@ void process_canard_TX_queue( uint8_t queue_num )
       uint32_t bus_id = encode_bus_id( bus_num, id );
       
       memcpy( &vb_frame[1], &bus_id, 4);
-      memcpy( &vb_frame[6], (uint8_t *)ti->frame.payload, ti->frame.payload_size);
+      memcpy( &vb_frame[5], (uint8_t *)ti->frame.payload, ti->frame.payload_size);
       
       distribute_vb_frame( vb_frame );
     }

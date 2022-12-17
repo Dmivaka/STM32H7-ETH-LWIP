@@ -120,6 +120,7 @@ void transmit_packet(const void *_buf, int buf_len, void *user)
 void lcm_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port)
 {
   lcmlite_receive_packet( &lcm, p->payload, p->len, NULL);
+  pbuf_free(p);
   return ;
 }
 //-----------------------------------------------
