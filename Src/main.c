@@ -101,20 +101,67 @@ uint8_t SPI_RX_body[1024] = {0};
 buffer_instance SPI_RX_buf = {0, NULL, 0, SPI_RX_body};
 
 CanardInstance 	canard; // This is the core structure that keeps all of the states and allocated resources of the library instance
-CanardTxQueue 	queue1; // Prioritized transmission queue that keeps CAN frames destined for transmission via one CAN interface
+
+// each queue is bound to its dedicated can-bus - 3 on the main and 3 on the companion chip.
+CanardTxQueue 	queue0; // Prioritized transmission queue that keeps CAN frames destined for transmission via one CAN interface
+CanardTxQueue 	queue1;
 CanardTxQueue 	queue2;
 CanardTxQueue 	queue3;
 CanardTxQueue 	queue4;
 CanardTxQueue 	queue5;
-CanardTxQueue 	queue6;
 
-CanardTxQueue * TxQueuesMap[6] = { &queue1, &queue2, &queue3, &queue4, &queue5, &queue6 };
+CanardTxQueue * TxQueuesMap[6] = { &queue0, &queue1, &queue2, &queue3, &queue4, &queue5 };
 
-//uint8_t device_to_queue[12] = {1,1,2,2,3,3,4,4,5,5,6,6};
-uint8_t device_to_queue[12] = {1,0,0,0,0,0,0,0,0,0,0,0}; // only 1st driver is enabled and is bound to the 2nd queue (FDCAN2)
+//int8_t device_to_queue[12] = {1,1,2,2,3,3,4,4,5,5,6,6};
+int8_t device_to_queue[12] = {  1,  0, -1,
+                               -1, -1, -1,
+                               -1, -1, -1,
+                               -1, -1, -1}; // only null and first driver are enabled - the can1 and can0 buses respectevely
+
+uint16_t device_node_id[12] = {  10, 11, 12,
+                                 13, 14, 15,
+                                 16, 17, 18,
+                                 19, 20, 21 };
+
+uint16_t device_tx_port[12] = {  1000, 1010, 1020,
+                                 1030, 1040, 1050,
+                                 1060, 1070, 1080,
+                                 1090, 1100, 1200 };
+
+uint16_t device_rx_port[12] = {  1001, 1011, 1021,
+                                 1031, 1041, 1051,
+                                 1061, 1071, 1081,
+                                 1091, 1101, 1201 };
+
+CanardRxSubscription Device0_Sub;
+CanardRxSubscription Device1_Sub;
+CanardRxSubscription Device2_Sub;
+CanardRxSubscription Device3_Sub;
+CanardRxSubscription Device4_Sub;
+CanardRxSubscription Device5_Sub;
+CanardRxSubscription Device6_Sub;
+CanardRxSubscription Device7_Sub;
+CanardRxSubscription Device8_Sub;
+CanardRxSubscription Device9_Sub;
+CanardRxSubscription Device10_Sub;
+CanardRxSubscription Device11_Sub;
+
+/*
+CanardRxSubscription * CanardSubscriptionMap[12] = {  &Device0_Sub, &Device1_Sub, &Device2_Sub,
+                                                      &Device3_Sub, &Device4_Sub, &Device5_Sub,
+                                                      &Device6_Sub, &Device7_Sub, &Device8_Sub,
+                                                      &Device9_Sub, &Device10_Sub, &Device11_Sub };
+*/
+
+CanardRxSubscription * CanardSubscriptionMap[12] = {  &Device0_Sub, &Device1_Sub, NULL,
+                                                      NULL, NULL, NULL,
+                                                      NULL, NULL, NULL,
+                                                      NULL, NULL, NULL };
 
 extern uint8_t LCM_rx_flag;
+extern uint8_t LCM_tx_flag;
 extern hl_command_msg rx_lcm_msg;
+extern measurment tx_lcm_msg;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -168,6 +215,8 @@ extern struct udp_pcb *upcb;
 
 uint16_t index = 0;
 uint8_t udp_out_buffer[512] = {0};  
+
+uint16_t response_recorder = 0;
 /* USER CODE END 0 */
 
 /**
@@ -183,6 +232,19 @@ int main(void)
   for( int i = 0; i < 6; i++ )
   {
     *TxQueuesMap[i] = canardTxInit( 10, CANARD_MTU_CAN_FD); // really we need 1 element only
+  }
+
+  for( int i = 0; i < 12; i++ )
+  {
+    if( CanardSubscriptionMap[i] != NULL )
+    {
+      if( canardRxSubscribe(    &canard,
+                                CanardTransferKindMessage,
+                                device_rx_port[i],
+                                uavcan_primitive_array_Real32_1_0_EXTENT_BYTES_,
+                                CANARD_DEFAULT_TRANSFER_ID_TIMEOUT_USEC,
+                                CanardSubscriptionMap[i] ) != 1 ){ Error_Handler(); }
+    }
   }
   
   // bind uint8_t arrays to each circular buffer instance
@@ -237,15 +299,15 @@ int main(void)
 
   /* Configure the system clock */
   SystemClock_Config();
-
+  
 /* Configure the peripherals common clocks */
   PeriphCommonClock_Config();
-
+  
   /* USER CODE BEGIN SysInit */
   __HAL_RCC_D2SRAM1_CLK_ENABLE(); // have no idea how to do this from the CubeMX software.
   HAL_Delay(1000); // does not work without this line. I believe it's linked to lan8720 start-up time. 
   /* USER CODE END SysInit */
-
+  
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
@@ -264,7 +326,7 @@ int main(void)
   {
     SPI_TX_buf[i] = i;
   }
-
+  
   udp_client_connect();
   udp_lcm_connect();
   
@@ -317,7 +379,7 @@ int main(void)
     }
   }
   ///////////////////////////////////////////////////////////////////////////
-
+  
   FDCAN_TxHeaderTypeDef TxHeader;
   uint8_t data[8] = {'a','b','c','d','e','f','g','h'};
   
@@ -343,6 +405,7 @@ int main(void)
 
   }
   
+  /*
   CanardRxSubscription heartbeat_msg_subscription;
   if( canardRxSubscribe(        &canard,
                                 CanardTransferKindMessage,
@@ -350,6 +413,7 @@ int main(void)
                                 uavcan_node_Heartbeat_1_0_EXTENT_BYTES_,
                                 CANARD_DEFAULT_TRANSFER_ID_TIMEOUT_USEC,
                                 &heartbeat_msg_subscription) != 1 ){ Error_Handler(); }  
+  */
 
   /* USER CODE END 2 */
 
@@ -367,7 +431,7 @@ int main(void)
       //LL_GPIO_SetOutputPin(GPIOD, LL_GPIO_PIN_6);
       //HAL_SPI_Transmit_DMA(&hspi1, SPI_TX_buf, 512);
       
-      conke(); // debug transmition of sample data
+      //conke(); // debug transmition of sample data
       timestamp += 1000;
     }
     
@@ -376,20 +440,21 @@ int main(void)
     if( LCM_rx_flag )
     {
       uint8_t c_serialized[uavcan_primitive_array_Real32_1_0_EXTENT_BYTES_] = {0};
-      size_t c_serialized_size = sizeof(c_serialized);
       
       uavcan_primitive_array_Real32_1_0 uavcan_tx_array;
       uavcan_tx_array.value.count = 5;
-        
+      
       for( int i = 0; i < 12; i++)
       {
-        if( device_to_queue[i] != 0 ) // check if selected drive is ebabled 
+        if( device_to_queue[i] >= 0 ) // check if selected drive is ebabled 
         {
           uavcan_tx_array.value.elements[0] = rx_lcm_msg.act[i].position;
           uavcan_tx_array.value.elements[1] = rx_lcm_msg.act[i].velocity;
           uavcan_tx_array.value.elements[2] = rx_lcm_msg.act[i].torque;
           uavcan_tx_array.value.elements[3] = rx_lcm_msg.act[i].kp;
           uavcan_tx_array.value.elements[4] = rx_lcm_msg.act[i].kd;
+          
+          size_t c_serialized_size = uavcan_primitive_array_Real32_1_0_EXTENT_BYTES_;
 
           if ( uavcan_primitive_array_Real32_1_0_serialize_( &uavcan_tx_array, c_serialized, &c_serialized_size) < 0)
           {
@@ -398,7 +463,7 @@ int main(void)
           
           const CanardTransferMetadata transfer_metadata = {    .priority       = CanardPriorityHigh,
                                                                 .transfer_kind  = CanardTransferKindMessage,
-                                                                .port_id        = 1000,
+                                                                .port_id        = device_tx_port[i],
                                                                 .remote_node_id = CANARD_NODE_ID_UNSET,
                                                                 .transfer_id    = message_transfer }; 
 
@@ -418,8 +483,16 @@ int main(void)
       
       message_transfer++ ;
       LCM_rx_flag = 0;
+      
+      response_recorder = 0;
     }
-
+    
+    if( LCM_tx_flag )
+    {
+      conke();
+      LCM_tx_flag = 0;
+    }
+    
     /*
     if( gaga.bytes_written > 70 )
     {
@@ -448,13 +521,13 @@ int main(void)
       if (HAL_FDCAN_GetRxMessage(&hfdcan2, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK){ Error_Handler(); }
       write_can_frame(&FDCAN2_RX_buf, 1, &RxHeader, RxData);
     }
-
+    
     while( HAL_FDCAN_GetRxFifoFillLevel(&hfdcan3, FDCAN_RX_FIFO0) > 0 )
     {
       if (HAL_FDCAN_GetRxMessage(&hfdcan3, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK){ Error_Handler(); }
       write_can_frame(&FDCAN3_RX_buf, 2, &RxHeader, RxData);
     }
-
+    
     /// processing of the received FDCAN frames from companion (via SPI) chip
     while( SPI_RX_buf.bytes_written > 0 )
     {
@@ -495,7 +568,7 @@ int main(void)
         debug_index = 0;
       }
     }
-
+    
     /// processing of the received FDCAN frames from the main chip
     // if there's any non-empty RX-buffer
     if( FDCAN1_RX_buf.bytes_written || FDCAN2_RX_buf.bytes_written || FDCAN3_RX_buf.bytes_written )
@@ -521,7 +594,7 @@ int main(void)
         }
       }
     }
-
+    
     /// break UDP TX ring buffer into a bunch of UDP frames each smaller than 512 bytes and send them out
     /// right now data is sent only when buffer is full
     while( UDP_TX_ring.bytes_written > 0 )
@@ -656,7 +729,7 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Instance = FDCAN1;
   hfdcan1.Init.FrameFormat = FDCAN_FRAME_FD_BRS;
   hfdcan1.Init.Mode = FDCAN_MODE_NORMAL;
-  hfdcan1.Init.AutoRetransmission = DISABLE;
+  hfdcan1.Init.AutoRetransmission = ENABLE;
   hfdcan1.Init.TransmitPause = ENABLE;
   hfdcan1.Init.ProtocolException = DISABLE;
   hfdcan1.Init.NominalPrescaler = 1;
@@ -728,7 +801,7 @@ static void MX_FDCAN2_Init(void)
   hfdcan2.Instance = FDCAN2;
   hfdcan2.Init.FrameFormat = FDCAN_FRAME_FD_BRS;
   hfdcan2.Init.Mode = FDCAN_MODE_NORMAL;
-  hfdcan2.Init.AutoRetransmission = DISABLE;
+  hfdcan2.Init.AutoRetransmission = ENABLE;
   hfdcan2.Init.TransmitPause = ENABLE;
   hfdcan2.Init.ProtocolException = DISABLE;
   hfdcan2.Init.NominalPrescaler = 1;
@@ -1072,6 +1145,14 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+uint16_t findDeviceIndex(uint16_t *array, size_t size, uint16_t target) 
+{
+    uint16_t i=0;
+    while((i<size) && (array[i] != target)) i++;
+
+    return (i<size) ? (i) : (-1);
+}
+
 void process_vb_rx_frame(uint8_t *local_buffer, uint8_t frame_length)
 {
   uint32_t bus_id = 0;
@@ -1099,6 +1180,36 @@ void process_vb_rx_frame(uint8_t *local_buffer, uint8_t frame_length)
   {
     if( result == 1 )
     {
+      uint16_t index = findDeviceIndex( (uint16_t *)device_rx_port, 12, (uint16_t)transfer.metadata.port_id );
+      
+      if( device_node_id[index] == transfer.metadata.remote_node_id )
+      {
+        uavcan_primitive_array_Real32_1_0 array;
+        size_t array_ser_buf_size = uavcan_primitive_array_Real32_1_0_EXTENT_BYTES_;
+
+        if ( uavcan_primitive_array_Real32_1_0_deserialize_( &array, transfer.payload, &array_ser_buf_size) < 0 )
+        {
+          Error_Handler();
+        }
+
+        tx_lcm_msg.act[index].position = array.value.elements[0];
+        tx_lcm_msg.act[index].velocity = array.value.elements[1];
+        tx_lcm_msg.act[index].torque = array.value.elements[2];
+        
+        response_recorder |= 1UL << index; // set bit corresponding to the device answered
+
+        // check if every device returned an answer
+        if( response_recorder == 0x3 )
+        {
+          LCM_tx_flag = 1;
+          
+          response_recorder = 0;
+        }
+      }
+      else
+      {
+        Error_Handler();
+      }
       // parse the transfer and load value into the TX LCM message 
       //if( transfer.metadata.remote_node_id == 1 ) // something happens I quess
       canard.memory_free(&canard, transfer.payload);      // Deallocate the dynamic memory afterwards.

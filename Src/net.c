@@ -34,6 +34,7 @@ extern buffer_instance * TX_Buffers_Map[3];
 char hl_command_charname[] = "EXAMPLE";
 
 uint8_t LCM_rx_flag = 0;
+uint8_t LCM_tx_flag = 0;
 
 //-----------------------------------------------
 static inline float ReverseFloat( const float inFloat );
@@ -76,13 +77,14 @@ uint64_t measurment_hash = 0x5f3bf46b0e2209da;
 
 void conke(void)
 {
-    for( int i = 0; i < 12; i++ )
+  /*
+  for( int i = 0; i < 12; i++ )
   {
     tx_lcm_msg.act[i].position = i*1.0f + 0.1f;
     tx_lcm_msg.act[i].velocity = i*1.0f + 0.2f;
     tx_lcm_msg.act[i].torque = i*1.0f + 0.3f;
   }
-  
+  */
   memcpy( &lcm_tx_buf, &measurment_hash, 8);
 
   for( int i = 0; i < sizeof(tx_lcm_msg); i += 4)
