@@ -39,6 +39,8 @@
 
 #include "hl_command_msg.h"
 #include "hl_state_msg.h"
+
+#include "circular_heap.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -94,7 +96,7 @@ buffer_instance * RX_Buffers_Map[3] = { &FDCAN1_RX_buf, &FDCAN2_RX_buf, &FDCAN3_
 
 // the upper two kbytes of SRAM2 region
 #pragma location=0x30007800
-uint8_t SPI_TX_buf[512] = {0};
+uint8_t SPI_TX_buf[1024] = {0};
 #pragma location=0x30007C00
 uint8_t SPI_RX_body[1024] = {0};
 
@@ -200,9 +202,6 @@ buffer_instance gaga = {0, NULL, 0, NULL};
 uint8_t my_buffer[buf_size] = {0};
 uint8_t timer_update_flag = 0;
 
-extern uint8_t companion_TX_buf[buf_size];
-extern buffer_instance companion_TX_ins;
-
 uint32_t previos_char = 9000;
 
 uint8_t debug_collector[1024] = {0};
@@ -217,6 +216,9 @@ uint16_t index = 0;
 uint8_t udp_out_buffer[512] = {0};  
 
 uint16_t response_recorder = 0;
+
+queue spi_tx_queue = {NULL, NULL};
+circular_heap_t spi_tx_heap;
 /* USER CODE END 0 */
 
 /**
@@ -226,6 +228,8 @@ uint16_t response_recorder = 0;
 int main(void)
 {
   /* USER CODE BEGIN 1 */
+  circular_heap_init(&spi_tx_heap, SPI_TX_buf, 1024);
+  
   canard = canardInit(&memAllocate, &memFree);	// Initialization of a canard instance
   canard.node_id = 40;
   
@@ -321,12 +325,7 @@ int main(void)
   MX_TIM7_Init();
   /* USER CODE BEGIN 2 */
   HAL_SPI_Receive_DMA(&hspi3, SPI_RX_body, 1024);
-  
-  for( int i = 0; i < 512; i++)
-  {
-    SPI_TX_buf[i] = i;
-  }
-  
+
   udp_client_connect();
   udp_lcm_connect();
   
@@ -1339,6 +1338,7 @@ void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
 {
   if( hspi->Instance == SPI1 )
   {
+    circular_heap_free( &spi_tx_heap, dequeue( &spi_tx_queue ));
     send_frame_SPI();
   }
 }
@@ -1348,28 +1348,21 @@ uint8_t send_frame_SPI(void)
 {
   if( !LL_SPI_IsActiveMasterTransfer(SPI1) )
   {
-    buffer_instance *s = &companion_TX_ins;
-
-    if( s->bytes_written > 0 )
+    char *local_buffer = get_queue_head( &spi_tx_queue );
+    if( local_buffer != NULL )
     {
-      uint8_t frame_length = s->buffer_body[s->head]; // get the frame length, it's located at the beginning of new frame in the buffer
-      if( frame_length > s->bytes_written )
-      {
-        // buffer is corrupted
-        Error_Handler();
-      }
+      // bind payload to SPI DMA transfer
+      uint8_t data_len = local_buffer[0];
       
-      /*
-      if( frame_length != 13 )
-      {
-        Error_Handler();
-      }
-      */
-      
-      read_buffer( s, SPI_TX_buf, frame_length);
+      if( data_len != 13 ){     Error_Handler();        }
       
       LL_GPIO_SetOutputPin(GPIOD, LL_GPIO_PIN_6);
-      HAL_SPI_Transmit_DMA(&hspi1, SPI_TX_buf, frame_length);      
+      HAL_SPI_Transmit_DMA(&hspi1, local_buffer, data_len);      
+    }
+    else
+    {
+      // buffer's empty!
+      while(1);
     }
   }
   

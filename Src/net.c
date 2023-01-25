@@ -17,6 +17,8 @@
 
 #include "hl_command_msg.h"
 #include "hl_state_msg.h"
+
+#include "circular_heap.h"
 //-----------------------------------------------
 struct udp_pcb *upcb;
 
@@ -99,7 +101,7 @@ void conke(void)
 }
 
 ip_addr_t Multicast_Addr;
-void transmit_packet(const void *_buf, int buf_len, void *user)
+void transmit_LCM_packet(const void *_buf, int buf_len, void *user)
 {
   struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, buf_len, PBUF_RAM); // allocate LWIP memory for outgoing UDP packet
 
@@ -146,7 +148,7 @@ void udp_lcm_connect(void)
     }
   }
   
-  lcmlite_init(&lcm, transmit_packet, NULL);
+  lcmlite_init(&lcm, transmit_LCM_packet, NULL);
   
   // subscribe to HL_COMMAND messages
   lcmlite_subscription_t *sub = malloc(sizeof(lcmlite_subscription_t));
@@ -173,7 +175,6 @@ void udp_client_connect(void)
     }
   }
 }
-//-----------------------------------------------
 
 extern buffer_instance gaga;
 uint8_t debug_buf[128] = {0};
@@ -227,8 +228,9 @@ void udp_client_send(void)
   }
 }
 
-uint8_t companion_TX_buf[buf_size] = {0};
-buffer_instance companion_TX_ins = {0, NULL, 0, companion_TX_buf};
+//-----------------------------------------------
+extern queue spi_tx_queue;
+extern circular_heap_t spi_tx_heap;
 
 volatile uint32_t debug_counter = 0;
 
@@ -247,7 +249,7 @@ void distribute_vb_frame( uint8_t * vb_frame )
     buffer_instance *TX_buffer = TX_Buffers_Map[bus_num];
     
     if( FDCAN_Handle != NULL )
-    {    
+    {
       if( HAL_FDCAN_GetTxFifoFreeLevel(FDCAN_Handle) > 0 )
       {
         // if interrupt fires right now it will try access TX_buffer in line below
@@ -277,7 +279,18 @@ void distribute_vb_frame( uint8_t * vb_frame )
     uint32_t primask_bit = __get_PRIMASK();   // backup PRIMASK bit
     __disable_irq();                          // Disable all interrupts by setting PRIMASK bit on Cortex
       // while we are accessing the buffer the SPI interrupt can occur - it will corrupt it. 
-      write_buffer(&companion_TX_ins, vb_frame, vb_frame_len); // write message length
+
+      item* new_element = circular_heap_alloc( &spi_tx_heap, sizeof(void*) + vb_frame_len );
+      if( new_element != NULL )
+      {
+        memcpy( &new_element->payload, vb_frame, vb_frame_len );
+        enqueue( &spi_tx_queue, new_element );
+      }
+      else
+      {
+        // buffer is full
+      }
+      
     __set_PRIMASK(primask_bit);               // Restore PRIMASK bit
     
     if( !LL_SPI_IsActiveMasterTransfer(SPI1) )
