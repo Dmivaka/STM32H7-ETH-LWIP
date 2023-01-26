@@ -75,24 +75,14 @@ TIM_HandleTypeDef htim7;
 uint8_t FDCAN1_TX_body[buf_size] = {0};
 buffer_instance FDCAN1_TX_buf = {0, NULL, 0, FDCAN1_TX_body};
 
-uint8_t FDCAN1_RX_body[buf_size] = {0};
-buffer_instance FDCAN1_RX_buf = {0, NULL, 0, FDCAN1_RX_body};
-
 uint8_t FDCAN2_TX_body[buf_size] = {0};
 buffer_instance FDCAN2_TX_buf = {0, NULL, 0, FDCAN2_TX_body};
-
-uint8_t FDCAN2_RX_body[buf_size] = {0};
-buffer_instance FDCAN2_RX_buf = {0, NULL, 0, FDCAN2_RX_body};
 
 uint8_t FDCAN3_TX_body[buf_size] = {0};
 buffer_instance FDCAN3_TX_buf = {0, NULL, 0, FDCAN3_TX_body};
 
-uint8_t FDCAN3_RX_body[buf_size] = {0};
-buffer_instance FDCAN3_RX_buf = {0, NULL, 0, FDCAN3_RX_body};
-
 FDCAN_HandleTypeDef * FDCAN_Handles_Map[3] = {&hfdcan1, &hfdcan2, &hfdcan3};
 buffer_instance * TX_Buffers_Map[3] = { &FDCAN1_TX_buf, &FDCAN2_TX_buf, &FDCAN3_TX_buf};
-buffer_instance * RX_Buffers_Map[3] = { &FDCAN1_RX_buf, &FDCAN2_RX_buf, &FDCAN3_RX_buf};
 
 // the upper two kbytes of SRAM2 region
 #pragma location=0x30007800
@@ -221,6 +211,10 @@ queue spi_tx_queue = {NULL, NULL};
 circular_heap_t spi_tx_heap;
 
 void collect_can_frame( FDCAN_RxHeaderTypeDef * RxHeader, uint8_t *RxData);
+uint8_t parse_canard_frame( uint32_t id, size_t size, void* payload);
+
+uint8_t serialize_can_frame( uint8_t bus, uint32_t id, size_t size, uint8_t* src, uint8_t* dst);
+void deserialize_can_frame( uint8_t *bus, uint32_t *id, size_t *size, uint8_t* dst, uint8_t* src);
 /* USER CODE END 0 */
 
 /**
@@ -507,29 +501,34 @@ int main(void)
     }
     */
     
-    /// retrieve data from the FDCAN peripherals in polling mode
-    FDCAN_RxHeaderTypeDef RxHeader = {0};
-    uint8_t RxData[64];
-    
-    while( HAL_FDCAN_GetRxFifoFillLevel(&hfdcan1, FDCAN_RX_FIFO0) > 0 )
+    /// retrieve and process frames from the on-chip FDCAN peripherals
+    for( int i = 0; i < 3; i++)
     {
-      if (HAL_FDCAN_GetRxMessage(&hfdcan1, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK){ Error_Handler(); }
-      collect_can_frame( &RxHeader, RxData ); // filter frames into the LCM and UAVCAN -related buffers
+      while( HAL_FDCAN_GetRxFifoFillLevel(FDCAN_Handles_Map[i], FDCAN_RX_FIFO0) > 0 )
+      {
+        FDCAN_RxHeaderTypeDef Header;
+        uint8_t RxData[64];
+    
+        if (HAL_FDCAN_GetRxMessage(FDCAN_Handles_Map[i], FDCAN_RX_FIFO0, &Header, RxData) != HAL_OK){ Error_Handler(); }
+
+        // separate frames into the LCM and UAVCAN -related buffers
+        if( !parse_canard_frame( Header.Identifier, LengthDecoder(Header.DataLength), RxData ) )
+        {
+          // the canard frames filter said it is not the canard frame and returned 0.
+          // we have to put this frame untouched into UDP TX chain
+          uint8_t local_buffer[69] = {0};
+          uint8_t msg_len = serialize_can_frame(  1, 
+                                                  Header.Identifier, 
+                                                  LengthDecoder(Header.DataLength), 
+                                                  RxData, 
+                                                  local_buffer);
+
+          write_buffer(&UDP_TX_ring, local_buffer, msg_len);
+        }
+      }
     }
     
-    while( HAL_FDCAN_GetRxFifoFillLevel(&hfdcan2, FDCAN_RX_FIFO0) > 0 )
-    {
-      if (HAL_FDCAN_GetRxMessage(&hfdcan2, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK){ Error_Handler(); }
-      collect_can_frame( &RxHeader, RxData ); // filter frames into the LCM and UAVCAN -related buffers
-    }
-    
-    while( HAL_FDCAN_GetRxFifoFillLevel(&hfdcan3, FDCAN_RX_FIFO0) > 0 )
-    {
-      if (HAL_FDCAN_GetRxMessage(&hfdcan3, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK){ Error_Handler(); }
-      collect_can_frame( &RxHeader, RxData ); // filter frames into the LCM and UAVCAN -related buffers
-    }
-    
-    /// processing of the received FDCAN frames from companion (via SPI) chip
+    /// processing of the serialized FDCAN frames from companion chip (SPI RX chain)
     while( SPI_RX_buf.bytes_written > 0 )
     {
       uint8_t local_buffer[69] = {0};
@@ -547,9 +546,20 @@ int main(void)
         read_buffer(&SPI_RX_buf, local_buffer, frame_length);
         
       __set_PRIMASK(primask_bit);     // Restore PRIMASK bit
-      
-      process_vb_rx_frame(local_buffer, frame_length); // filter frames into the LCM and UAVCAN -related buffers
-      
+
+      uint32_t identifier;
+      size_t size;
+      uint8_t RxData[69];
+      deserialize_can_frame( NULL, &identifier, &size, RxData, local_buffer);
+        
+      // separate frames into the LCM and UAVCAN -related buffers
+      if( !parse_canard_frame( identifier, size, RxData ) )
+      {
+        // the canard frames filter said it is not the canard frame and returned 0.
+        // we have to put this frame untouched into UDP TX chain
+        write_buffer(&UDP_TX_ring, local_buffer, frame_length);
+      }
+
       /// the rest is debug errors check
       if( frame_length != 13 )
       {
@@ -1128,18 +1138,13 @@ uint16_t findDeviceIndex(uint16_t *array, size_t size, uint16_t target)
     return (i<size) ? (i) : (-1);
 }
 
-void process_vb_rx_frame(uint8_t *local_buffer, uint8_t frame_length)
+uint8_t parse_canard_frame( uint32_t id, size_t size, void* payload)
 {
-  uint32_t bus_id = 0;
-  memcpy(&bus_id, &local_buffer[1], 4);
-  //uint8_t bus_num = decode_bus_num( bus_id );
-  //if( bus_num > 2 ){ Error_Handler(); } // only for debugging purposes
-
   CanardFrame rxf;
 
-  rxf.extended_can_id = decode_can_id( bus_id );
-  rxf.payload_size = (size_t)(frame_length - 5);
-  rxf.payload = (void*)&local_buffer[5];
+  rxf.extended_can_id = id;
+  rxf.payload_size = size;
+  rxf.payload = payload;
 
   CanardRxSubscription* out_subscription = NULL;
   CanardRxTransfer transfer;
@@ -1188,84 +1193,41 @@ void process_vb_rx_frame(uint8_t *local_buffer, uint8_t frame_length)
       // parse the transfer and load value into the TX LCM message 
       //if( transfer.metadata.remote_node_id == 1 ) // something happens I quess
       canard.memory_free(&canard, transfer.payload);      // Deallocate the dynamic memory afterwards.
+      return 2;
     }
     else
     {
       // the frame is UAVCAN related, but it does not complete any transfer - do nothing for now. 
+      return 1;
     }
   }
   else // we did not subscribe to this subject - pass it up
   {
-    // load frame into the UDP TX buffer
-    write_buffer(&UDP_TX_ring, local_buffer, frame_length);
+    return 0;
   }
 }
 
-void collect_can_frame( FDCAN_RxHeaderTypeDef * RxHeader, uint8_t *RxData)
+// returns the size of serialized message in bytes
+uint8_t serialize_can_frame( uint8_t bus, uint32_t id, size_t size, uint8_t* src, uint8_t* dst)
 {
-  CanardFrame rxf;
-  
-  rxf.extended_can_id = RxHeader->Identifier;
-  rxf.payload_size = (size_t)LengthDecoder( RxHeader->DataLength );
-  rxf.payload = (void*)RxData;
+  dst[0] = size + 5; // the first byte holds the full length of serialized frame
 
-  CanardRxSubscription* out_subscription = NULL;
-  CanardRxTransfer transfer;
+  uint32_t bus_id = encode_bus_id( bus, id );
+  memcpy( &dst[1], &bus_id, 4);
+  memcpy( &dst[5], src, size - 5 );
+  return size + 5;
+}
+
+void deserialize_can_frame( uint8_t *bus, uint32_t *id, size_t *size, uint8_t* dst, uint8_t* src)
+{
+  *bus = decode_bus_num( *(uint32_t*)src );
+  *id = decode_can_id( *(uint32_t*)src );
+  *size = src[0] - 5;
   
-  int8_t result = canardRxAccept(       &canard,
-                                        micros(),
-                                        &rxf,
-                                        0,
-                                        &transfer,
-                                        &out_subscription);
-  
-  if( out_subscription != NULL ) // if we did subscribe to this subject we keep the frame and wait for the completion of transfer
+  // in case the destination pointer is zero, just unpacks the service info
+  if( dst != NULL )
   {
-    if( result == 1 ) // process message if it is the complete transfer
-    {
-      uint16_t index = findDeviceIndex( (uint16_t *)device_rx_port, 12, (uint16_t)transfer.metadata.port_id );
-      
-      if( device_node_id[index] == transfer.metadata.remote_node_id )
-      {
-        uavcan_primitive_array_Real32_1_0 array;
-        size_t array_ser_buf_size = uavcan_primitive_array_Real32_1_0_EXTENT_BYTES_;
-
-        if ( uavcan_primitive_array_Real32_1_0_deserialize_( &array, transfer.payload, &array_ser_buf_size) < 0 )
-        {
-          Error_Handler();
-        }
-
-        tx_lcm_msg.act[index].position = array.value.elements[0];
-        tx_lcm_msg.act[index].velocity = array.value.elements[1];
-        tx_lcm_msg.act[index].torque = array.value.elements[2];
-        
-        response_recorder |= 1UL << index; // set bit corresponding to the device answered
-
-        // check if every device returned an answer
-        if( response_recorder == 0x3 )
-        {
-          LCM_tx_flag = 1;
-          
-          response_recorder = 0;
-        }
-      }
-      else
-      {
-        //Error_Handler();
-      }
-      // parse the transfer and load value into the TX LCM message 
-      //if( transfer.metadata.remote_node_id == 1 ) // something happens I quess
-      canard.memory_free(&canard, transfer.payload);      // Deallocate the dynamic memory afterwards.
-    }
-    else
-    {
-      // the frame is UAVCAN related, but it does not complete any transfer - do nothing for now. 
-    }
-  }
-  else // we did not subscribe to this subject - pass it up
-  {
-    // load frame into the UDP TX buffer
-    //write_buffer(&UDP_TX_ring, local_buffer, frame_length);
+    memcpy( dst, &src[5], *size);
   }
 }
 
@@ -1413,42 +1375,6 @@ uint8_t send_frame_SPI(void)
       while(1);
     }
   }
-  
-  return 0;
-}
-
-uint8_t write_can_frame(buffer_instance * s, uint8_t src_bus, FDCAN_RxHeaderTypeDef * head, uint8_t *data)
-{
-  uint8_t can_message_length = LengthDecoder( head->DataLength ) + 5; // together with service bytes
-  
-  write_buffer(s, &can_message_length, 1); // write message length
-  
-  can_message_length -= 5; // 25 bytes with the service info
-
-  uint32_t id = head->Identifier;
-  uint32_t bus_id = encode_bus_id( src_bus, id );
-
-  write_buffer(s, (uint8_t*)&bus_id, 4); // write message length
-  write_buffer(s, data, can_message_length); // write message length
-  
-  return 0;
-}
-
-uint8_t read_can_frame(buffer_instance * s, FDCAN_TxHeaderTypeDef * head, uint8_t *data)
-{
-  uint8_t can_message_length = 0;
-  uint32_t bus_id = 0;
-  uint8_t bus = 0;
-  uint32_t id = 0;
-  
-  read_buffer(s, &can_message_length, 1);
-  can_message_length -= 5;
-  read_buffer(s, (uint8_t *)&bus_id, 4);
-  read_buffer(s, data, can_message_length);
-
-  head->DataLength = LengthCoder( can_message_length );
-  head->Identifier = decode_can_id( bus_id );
-  // process can frame
   
   return 0;
 }
