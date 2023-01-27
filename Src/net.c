@@ -238,11 +238,12 @@ volatile uint32_t debug_counter = 0;
 // and actual can-hardware on the main or companion chip. 
 void distribute_vb_frame( uint8_t * vb_frame )
 {
-  uint8_t vb_frame_len = vb_frame[0];
-  uint32_t bus_id = 0;
-  memcpy(&bus_id, &vb_frame[1], 4);
-  uint8_t bus_num = decode_bus_num( bus_id );
-  
+  uint8_t bus_num;
+  uint32_t id;
+  size_t frame_len;
+
+  uint8_t *data_pointer = deserialize_can_frame( &bus_num, &id, &frame_len, NULL, vb_frame); // only extracts service info
+
   if( bus_num < 3 )
   {
     FDCAN_HandleTypeDef * FDCAN_Handle = FDCAN_Handles_Map[bus_num];
@@ -253,14 +254,16 @@ void distribute_vb_frame( uint8_t * vb_frame )
       if( HAL_FDCAN_GetTxFifoFreeLevel(FDCAN_Handle) > 0 )
       {
         // if interrupt fires right now it will try access TX_buffer in line below
-        push_can_frame( FDCAN_Handle, vb_frame, vb_frame_len);
+        push_can_frame( FDCAN_Handle, id, frame_len, data_pointer);
       }
       else
       {
         // this section should be critical
         uint32_t primask_bit = __get_PRIMASK();       // backup PRIMASK bit
         __disable_irq();                              // Disable all interrupts by setting PRIMASK bit on Cortex
-          write_buffer(TX_buffer, vb_frame, vb_frame_len); // write message length
+        
+          write_buffer(TX_buffer, vb_frame, frame_len + 5); // write message length
+          
         __set_PRIMASK(primask_bit);                   // Restore PRIMASK bit
       }
     }
@@ -280,10 +283,10 @@ void distribute_vb_frame( uint8_t * vb_frame )
     __disable_irq();                          // Disable all interrupts by setting PRIMASK bit on Cortex
       // while we are accessing the buffer the SPI interrupt can occur - it will corrupt it. 
 
-      item* new_element = circular_heap_alloc( &spi_tx_heap, sizeof(void*) + vb_frame_len );
+      item* new_element = circular_heap_alloc( &spi_tx_heap, sizeof(void*) + frame_len + 5 );
       if( new_element != NULL )
       {
-        memcpy( &new_element->payload, vb_frame, vb_frame_len );
+        memcpy( &new_element->payload, vb_frame, frame_len + 5 );
         enqueue( &spi_tx_queue, new_element );
       }
       else

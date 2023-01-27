@@ -53,8 +53,11 @@ extern "C" {
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
-uint8_t push_can_frame( FDCAN_HandleTypeDef *handle, uint8_t *frame_data, uint8_t frame_full_size);
+uint8_t push_can_frame( FDCAN_HandleTypeDef *handle, uint32_t id, uint8_t length, uint8_t *payload);
 uint8_t send_frame_SPI(void);
+
+uint8_t serialize_can_frame( uint8_t bus, uint32_t id, size_t size, uint8_t* src, uint8_t* dst);
+void *deserialize_can_frame( uint8_t *bus, uint32_t *id, size_t *size, uint8_t* dst, uint8_t* src);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/

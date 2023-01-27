@@ -170,13 +170,11 @@ static void MX_SPI1_Init(void);
 static void MX_SPI3_Init(void);
 static void MX_TIM7_Init(void);
 /* USER CODE BEGIN PFP */
-uint8_t write_can_frame(buffer_instance * s, uint8_t src_bus, FDCAN_RxHeaderTypeDef * head, uint8_t *data);
-uint8_t read_can_frame(buffer_instance * s, FDCAN_TxHeaderTypeDef * head, uint8_t *data);
+uint8_t parse_canard_frame( uint32_t id, size_t size, void* payload);
 
 static void *memAllocate(CanardInstance *const canard, const size_t amount);
 static void memFree(CanardInstance *const canard, void *const pointer);
 
-void process_vb_rx_frame(uint8_t *local_buffer, uint8_t frame_length);
 void process_canard_TX_queue( uint8_t queue_num );
 /* USER CODE END PFP */
 
@@ -210,11 +208,7 @@ uint16_t response_recorder = 0;
 queue spi_tx_queue = {NULL, NULL};
 circular_heap_t spi_tx_heap;
 
-void collect_can_frame( FDCAN_RxHeaderTypeDef * RxHeader, uint8_t *RxData);
-uint8_t parse_canard_frame( uint32_t id, size_t size, void* payload);
-
-uint8_t serialize_can_frame( uint8_t bus, uint32_t id, size_t size, uint8_t* src, uint8_t* dst);
-void deserialize_can_frame( uint8_t *bus, uint32_t *id, size_t *size, uint8_t* dst, uint8_t* src);
+//#define uavcan_en
 /* USER CODE END 0 */
 
 /**
@@ -1140,8 +1134,12 @@ uint16_t findDeviceIndex(uint16_t *array, size_t size, uint16_t target)
 
 uint8_t parse_canard_frame( uint32_t id, size_t size, void* payload)
 {
+  // parsing is not performed if uavcan is disabled
+  #ifndef uavcan_en
+    return 0;
+  #endif
+    
   CanardFrame rxf;
-
   rxf.extended_can_id = id;
   rxf.payload_size = size;
   rxf.payload = payload;
@@ -1218,7 +1216,7 @@ uint8_t serialize_can_frame( uint8_t bus, uint32_t id, size_t size, uint8_t* src
   return size + 5;
 }
 
-void deserialize_can_frame( uint8_t *bus, uint32_t *id, size_t *size, uint8_t* dst, uint8_t* src)
+void *deserialize_can_frame( uint8_t *bus, uint32_t *id, size_t *size, uint8_t* dst, uint8_t* src)
 {
   *bus = decode_bus_num( *(uint32_t*)src );
   *id = decode_can_id( *(uint32_t*)src );
@@ -1229,6 +1227,8 @@ void deserialize_can_frame( uint8_t *bus, uint32_t *id, size_t *size, uint8_t* d
   {
     memcpy( dst, &src[5], *size);
   }
+  
+  return &src[5];
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
@@ -1271,10 +1271,12 @@ void HAL_FDCAN_TxFifoEmptyCallback(FDCAN_HandleTypeDef *hfdcan)
       return ;
     }
 
+    /*
     if( push_can_frame(hfdcan, local_buffer, full_frame_length) == 1 )
     {
       Error_Handler();
     }
+    */
     
     free_level = HAL_FDCAN_GetTxFifoFreeLevel(hfdcan);
   }
@@ -1282,15 +1284,9 @@ void HAL_FDCAN_TxFifoEmptyCallback(FDCAN_HandleTypeDef *hfdcan)
   return ;
 }
 
-// push VB CAN frame into CAN FIFO
-uint8_t push_can_frame( FDCAN_HandleTypeDef *handle, uint8_t *frame_data, uint8_t frame_full_size)
+// push CAN frame into CAN FIFO
+uint8_t push_can_frame( FDCAN_HandleTypeDef *handle, uint32_t id, uint8_t length, uint8_t *payload)
 {
-  uint32_t bus_id = 0;
-  memcpy(&bus_id, &frame_data[1], 4);
-
-  uint8_t bus_num = decode_bus_num( bus_id );
-  uint32_t id = decode_can_id( bus_id );    
-
   if (HAL_FDCAN_GetTxFifoFreeLevel(handle) != 0)
   {
     FDCAN_TxHeaderTypeDef TxHeader;
@@ -1298,13 +1294,13 @@ uint8_t push_can_frame( FDCAN_HandleTypeDef *handle, uint8_t *frame_data, uint8_
     TxHeader.Identifier = id;
     TxHeader.IdType = FDCAN_EXTENDED_ID;
     TxHeader.TxFrameType = FDCAN_DATA_FRAME;
-    TxHeader.DataLength = LengthCoder( frame_full_size - 5 );
+    TxHeader.DataLength = LengthCoder( length );
     TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
     TxHeader.BitRateSwitch = FDCAN_BRS_ON;
     TxHeader.FDFormat = FDCAN_FD_CAN;
     TxHeader.TxEventFifoControl = FDCAN_STORE_TX_EVENTS;
     TxHeader.MessageMarker = 0x00;
-    if (HAL_FDCAN_AddMessageToTxFifoQ(handle, &TxHeader, &frame_data[5]) != HAL_OK)
+    if (HAL_FDCAN_AddMessageToTxFifoQ(handle, &TxHeader, payload) != HAL_OK)
     {
       Error_Handler();
     }
