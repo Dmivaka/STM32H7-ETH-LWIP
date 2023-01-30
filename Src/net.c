@@ -31,7 +31,6 @@ uint8_t RMT_IP_ADDRESS[4] = {192,168,2,105};
 struct udp_pcb *upcb_1;
 
 extern FDCAN_HandleTypeDef * FDCAN_Handles_Map[3];
-extern buffer_instance * TX_Buffers_Map[3];
 
 char hl_command_charname[] = "EXAMPLE";
 
@@ -232,23 +231,25 @@ void udp_client_send(void)
 extern queue spi_tx_queue;
 extern circular_heap_t spi_tx_heap;
 
+extern queue *can_tx_queues[3];
+extern circular_heap_t *can_tx_heaps[3];
+
 volatile uint32_t debug_counter = 0;
 
 // this function serves as abstraction layer between application-level can-buses
 // and actual can-hardware on the main or companion chip. 
 void distribute_vb_frame( uint8_t * vb_frame )
 {
-  uint8_t bus_num;
+  uint8_t bus;
   uint32_t id;
   size_t frame_len;
 
-  uint8_t *data_pointer = deserialize_can_frame( &bus_num, &id, &frame_len, NULL, vb_frame); // only extracts service info
+  uint8_t *data_pointer = deserialize_can_frame( &bus, &id, &frame_len, NULL, vb_frame); // only extracts service info
 
-  if( bus_num < 3 )
+  if( bus < 3 )
   {
-    FDCAN_HandleTypeDef * FDCAN_Handle = FDCAN_Handles_Map[bus_num];
-    buffer_instance *TX_buffer = TX_Buffers_Map[bus_num];
-    
+    FDCAN_HandleTypeDef * FDCAN_Handle = FDCAN_Handles_Map[bus];
+
     if( FDCAN_Handle != NULL )
     {
       if( HAL_FDCAN_GetTxFifoFreeLevel(FDCAN_Handle) > 0 )
@@ -262,8 +263,17 @@ void distribute_vb_frame( uint8_t * vb_frame )
         uint32_t primask_bit = __get_PRIMASK();       // backup PRIMASK bit
         __disable_irq();                              // Disable all interrupts by setting PRIMASK bit on Cortex
         
-          write_buffer(TX_buffer, vb_frame, frame_len + 5); // write message length
-          
+          item* new_element = circular_heap_alloc( can_tx_heaps[bus], sizeof(void*) + frame_len + 5 );
+          if( new_element != NULL )
+          {
+            memcpy( &new_element->payload, vb_frame, frame_len + 5 );
+            enqueue( can_tx_queues[bus], new_element );
+          }
+          else
+          {
+            // buffer is full
+          }
+
         __set_PRIMASK(primask_bit);                   // Restore PRIMASK bit
       }
     }
@@ -314,7 +324,7 @@ void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const
   {
     // parse one vb frame from the rx UDP packet
     uint8_t vb_frame_length = data[index];
-    
+
     distribute_vb_frame( &data[index] );
 
     index += vb_frame_length;

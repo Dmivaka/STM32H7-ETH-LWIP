@@ -72,17 +72,7 @@ TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim7;
 
 /* USER CODE BEGIN PV */
-uint8_t FDCAN1_TX_body[buf_size] = {0};
-buffer_instance FDCAN1_TX_buf = {0, NULL, 0, FDCAN1_TX_body};
-
-uint8_t FDCAN2_TX_body[buf_size] = {0};
-buffer_instance FDCAN2_TX_buf = {0, NULL, 0, FDCAN2_TX_body};
-
-uint8_t FDCAN3_TX_body[buf_size] = {0};
-buffer_instance FDCAN3_TX_buf = {0, NULL, 0, FDCAN3_TX_body};
-
 FDCAN_HandleTypeDef * FDCAN_Handles_Map[3] = {&hfdcan1, &hfdcan2, &hfdcan3};
-buffer_instance * TX_Buffers_Map[3] = { &FDCAN1_TX_buf, &FDCAN2_TX_buf, &FDCAN3_TX_buf};
 
 // the upper two kbytes of SRAM2 region
 #pragma location=0x30007800
@@ -205,9 +195,23 @@ uint8_t udp_out_buffer[512] = {0};
 
 uint16_t response_recorder = 0;
 
-queue spi_tx_queue = {NULL, NULL};
 circular_heap_t spi_tx_heap;
+queue spi_tx_queue = {NULL, NULL};
 
+uint8_t can1_tx_buffer[4096] = {0};
+circular_heap_t can1_tx_heap;
+queue can1_tx_queue = {NULL, NULL};
+
+uint8_t can2_tx_buffer[4096] = {0};
+circular_heap_t can2_tx_heap;
+queue can2_tx_queue = {NULL, NULL};
+
+uint8_t can3_tx_buffer[4096] = {0};
+circular_heap_t can3_tx_heap;
+queue can3_tx_queue = {NULL, NULL};
+
+queue *can_tx_queues[3] = { &can1_tx_queue, &can2_tx_queue, &can3_tx_queue };
+circular_heap_t *can_tx_heaps[3] = { &can1_tx_heap, &can2_tx_heap, &can3_tx_heap };
 //#define uavcan_en
 /* USER CODE END 0 */
 
@@ -219,6 +223,10 @@ int main(void)
 {
   /* USER CODE BEGIN 1 */
   circular_heap_init(&spi_tx_heap, SPI_TX_buf, 1024);
+  
+  circular_heap_init(&can1_tx_heap, can1_tx_buffer, 4096);
+  circular_heap_init(&can2_tx_heap, can2_tx_buffer, 4096);
+  circular_heap_init(&can3_tx_heap, can3_tx_buffer, 4096);
   
   canard = canardInit(&memAllocate, &memFree);	// Initialization of a canard instance
   canard.node_id = 40;
@@ -1218,9 +1226,10 @@ uint8_t serialize_can_frame( uint8_t bus, uint32_t id, size_t size, uint8_t* src
 
 void *deserialize_can_frame( uint8_t *bus, uint32_t *id, size_t *size, uint8_t* dst, uint8_t* src)
 {
-  *bus = decode_bus_num( *(uint32_t*)src );
-  *id = decode_can_id( *(uint32_t*)src );
   *size = src[0] - 5;
+  
+  *bus = decode_bus_num( *(uint32_t*)&src[1] );
+  *id = decode_can_id( *(uint32_t*)&src[1] );
   
   // in case the destination pointer is zero, just unpacks the service info
   if( dst != NULL )
@@ -1256,29 +1265,26 @@ void HAL_FDCAN_TxFifoEmptyCallback(FDCAN_HandleTypeDef *hfdcan)
   
   // find bus number from the handle name 
   uint8_t bus_num = findIndex(*FDCAN_Handles_Map, 3, hfdcan);
-  buffer_instance *TX_buffer = TX_Buffers_Map[bus_num];
   
-  uint8_t free_level = HAL_FDCAN_GetTxFifoFreeLevel(hfdcan);
-  while( free_level != 0 && TX_buffer->bytes_written > 0 )
+  while( HAL_FDCAN_GetTxFifoFreeLevel(hfdcan) != 0  )
   {
-    uint8_t full_frame_length = TX_buffer->buffer_body[TX_buffer->head]; // the length of the frame is stored in it's head
-    
-    uint8_t local_buffer[69] = {0};
-    
-    // this code can be interrupted only by other CAN periph blocks so no need of critical section. 
-    if( read_buffer(TX_buffer, local_buffer, full_frame_length) )
+    char * vb_frame = get_queue_head( can_tx_queues[bus_num] );
+    if( vb_frame != NULL )
     {
-      return ;
-    }
+      uint8_t bus;
+      uint32_t id;
+      size_t frame_len;
 
-    /*
-    if( push_can_frame(hfdcan, local_buffer, full_frame_length) == 1 )
-    {
-      Error_Handler();
+      uint8_t *tx_data_pointer = deserialize_can_frame( &bus, &id, &frame_len, NULL, vb_frame); // only extracts service info
+      
+      push_can_frame( hfdcan, id, frame_len, tx_data_pointer);
+      
+      circular_heap_free( can_tx_heaps[bus_num], dequeue( can_tx_queues[bus_num] ));
     }
-    */
-    
-    free_level = HAL_FDCAN_GetTxFifoFreeLevel(hfdcan);
+    else
+    {
+      break ;
+    }
   }
   
   return ;
