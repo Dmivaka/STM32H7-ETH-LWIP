@@ -190,9 +190,6 @@ buffer_instance UDP_TX_ring = {0, NULL, 0, UDP_TX_data};
 
 extern struct udp_pcb *upcb;
 
-uint16_t index = 0;
-uint8_t udp_out_buffer[512] = {0};  
-
 uint16_t response_recorder = 0;
 
 circular_heap_t spi_tx_heap;
@@ -212,6 +209,9 @@ queue can3_tx_queue = {NULL, NULL};
 
 queue *can_tx_queues[3] = { &can1_tx_queue, &can2_tx_queue, &can3_tx_queue };
 circular_heap_t *can_tx_heaps[3] = { &can1_tx_heap, &can2_tx_heap, &can3_tx_heap };
+
+struct pbuf *UDP_TX_buf = NULL;
+#define UDP_TX_size 128
 //#define uavcan_en
 /* USER CODE END 0 */
 
@@ -322,6 +322,9 @@ int main(void)
   MX_SPI3_Init();
   MX_TIM7_Init();
   /* USER CODE BEGIN 2 */
+  uint16_t UDP_TX_level = 0;
+  UDP_TX_buf = pbuf_alloc(PBUF_TRANSPORT, UDP_TX_size, PBUF_RAM); // allocate LWIP memory for outgoing UDP packet
+  
   HAL_SPI_Receive_DMA(&hspi3, SPI_RX_body, 1024);
 
   udp_client_connect();
@@ -524,8 +527,19 @@ int main(void)
                                                   LengthDecoder(Header.DataLength), 
                                                   RxData, 
                                                   local_buffer);
+          if( UDP_TX_level + msg_len > UDP_TX_size )
+          {
+            pbuf_realloc( UDP_TX_buf, UDP_TX_level);
+            
+            udp_send(upcb, UDP_TX_buf);
+            
+            pbuf_free(UDP_TX_buf);
+            UDP_TX_buf = pbuf_alloc(PBUF_TRANSPORT, UDP_TX_size, PBUF_RAM);
+            UDP_TX_level = 0;
+          }
 
-          write_buffer(&UDP_TX_ring, local_buffer, msg_len);
+          pbuf_take_at( UDP_TX_buf, local_buffer, msg_len, UDP_TX_level);
+          UDP_TX_level += msg_len;
         }
       }
     }
@@ -534,18 +548,18 @@ int main(void)
     while( SPI_RX_buf.bytes_written > 0 )
     {
       uint8_t local_buffer[69] = {0};
-      uint8_t frame_length = 0;
+      uint8_t msg_len = 0;
       
       uint32_t primask_bit = __get_PRIMASK();  // backup PRIMASK bit
       __disable_irq();                  // Disable all interrupts by setting PRIMASK bit on Cortex
       
-        frame_length = SPI_RX_buf.buffer_body[SPI_RX_buf.head]; // get the frame length, it's located at the beginning of new frame in the buffer
-        if( frame_length > SPI_RX_buf.bytes_written )
+        msg_len = SPI_RX_buf.buffer_body[SPI_RX_buf.head]; // get the frame length, it's located at the beginning of new frame in the buffer
+        if( msg_len > SPI_RX_buf.bytes_written )
         {
           // buffer is corrupted
           Error_Handler();
         }
-        read_buffer(&SPI_RX_buf, local_buffer, frame_length);
+        read_buffer(&SPI_RX_buf, local_buffer, msg_len);
         
       __set_PRIMASK(primask_bit);     // Restore PRIMASK bit
 
@@ -559,11 +573,23 @@ int main(void)
       {
         // the canard frames filter said it is not the canard frame and returned 0.
         // we have to put this frame untouched into UDP TX chain
-        write_buffer(&UDP_TX_ring, local_buffer, frame_length);
+          if( UDP_TX_level + msg_len > UDP_TX_size )
+          {
+            pbuf_realloc( UDP_TX_buf, UDP_TX_level);
+            
+            udp_send(upcb, UDP_TX_buf);
+            
+            pbuf_free(UDP_TX_buf);
+            UDP_TX_buf = pbuf_alloc(PBUF_TRANSPORT, UDP_TX_size, PBUF_RAM);
+            UDP_TX_level = 0;
+          }
+
+          pbuf_take_at( UDP_TX_buf, local_buffer, msg_len, UDP_TX_level);
+          UDP_TX_level += msg_len;
       }
 
       /// the rest is debug errors check
-      if( frame_length != 13 )
+      if( msg_len != 13 )
       {
         Error_Handler();
       }
@@ -582,6 +608,7 @@ int main(void)
       }
     }
 
+    /*
     /// break UDP TX ring buffer into a bunch of UDP frames each smaller than 512 bytes and send them out
     /// right now data is sent only when buffer is full
     while( UDP_TX_ring.bytes_written > 0 )
@@ -606,6 +633,7 @@ int main(void)
         }
       }
     }
+    */
   }
   /* USER CODE END 3 */
 }
@@ -1220,7 +1248,10 @@ uint8_t serialize_can_frame( uint8_t bus, uint32_t id, size_t size, uint8_t* src
 
   uint32_t bus_id = encode_bus_id( bus, id );
   memcpy( &dst[1], &bus_id, 4);
-  memcpy( &dst[5], src, size);
+  if( src != NULL )
+  {
+    memcpy( &dst[5], src, size);
+  }
   return size + 5;
 }
 
