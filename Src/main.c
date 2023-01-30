@@ -1220,7 +1220,7 @@ uint8_t serialize_can_frame( uint8_t bus, uint32_t id, size_t size, uint8_t* src
 
   uint32_t bus_id = encode_bus_id( bus, id );
   memcpy( &dst[1], &bus_id, 4);
-  memcpy( &dst[5], src, size - 5 );
+  memcpy( &dst[5], src, size);
   return size + 5;
 }
 
