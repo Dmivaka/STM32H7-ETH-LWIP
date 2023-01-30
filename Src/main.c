@@ -166,6 +166,8 @@ static void *memAllocate(CanardInstance *const canard, const size_t amount);
 static void memFree(CanardInstance *const canard, void *const pointer);
 
 void process_canard_TX_queue( uint8_t queue_num );
+
+void UDP_TX_send( uint16_t *UDP_TX_level );
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -176,17 +178,10 @@ uint64_t micros()
   return (uint64_t)(__HAL_TIM_GET_COUNTER(&htim7) + 50000u * TIM7_ITs);
 }
 
-buffer_instance gaga = {0, NULL, 0, NULL};
-uint8_t my_buffer[buf_size] = {0};
-uint8_t timer_update_flag = 0;
-
 uint32_t previos_char = 9000;
 
 uint8_t debug_collector[1024] = {0};
 uint32_t debug_index = 0;
-
-uint8_t UDP_TX_data[1024] = {0};
-buffer_instance UDP_TX_ring = {0, NULL, 0, UDP_TX_data};
 
 extern struct udp_pcb *upcb;
 
@@ -249,10 +244,7 @@ int main(void)
     }
   }
   */
-  // bind uint8_t arrays to each circular buffer instance
-  
-  gaga.buffer_body = my_buffer;
-  
+
   /*********************************************
 
   for( int i = 0; i < 32; i++ )
@@ -433,6 +425,11 @@ int main(void)
       
       //conke(); // debug transmition of sample data
       timestamp += 1000;
+      
+      if( UDP_TX_level > 0 )
+      {
+        UDP_TX_send( &UDP_TX_level );
+      }
     }
     
     MX_LWIP_Process();
@@ -492,20 +489,7 @@ int main(void)
       conke();
       LCM_tx_flag = 0;
     }
-    
-    /*
-    if( gaga.bytes_written > 70 )
-    {
-      udp_client_send();
-      __HAL_TIM_SET_COUNTER(&htim1, 0);
-    }
-    else if( timer_update_flag )
-    {
-      udp_client_send();
-      timer_update_flag = 0;
-    }
-    */
-    
+
     /// retrieve and process frames from the on-chip FDCAN peripherals
     for( int i = 0; i < 3; i++)
     {
@@ -529,13 +513,7 @@ int main(void)
                                                   local_buffer);
           if( UDP_TX_level + msg_len > UDP_TX_size )
           {
-            pbuf_realloc( UDP_TX_buf, UDP_TX_level);
-            
-            udp_send(upcb, UDP_TX_buf);
-            
-            pbuf_free(UDP_TX_buf);
-            UDP_TX_buf = pbuf_alloc(PBUF_TRANSPORT, UDP_TX_size, PBUF_RAM);
-            UDP_TX_level = 0;
+            UDP_TX_send( &UDP_TX_level );
           }
 
           pbuf_take_at( UDP_TX_buf, local_buffer, msg_len, UDP_TX_level);
@@ -573,19 +551,13 @@ int main(void)
       {
         // the canard frames filter said it is not the canard frame and returned 0.
         // we have to put this frame untouched into UDP TX chain
-          if( UDP_TX_level + msg_len > UDP_TX_size )
-          {
-            pbuf_realloc( UDP_TX_buf, UDP_TX_level);
-            
-            udp_send(upcb, UDP_TX_buf);
-            
-            pbuf_free(UDP_TX_buf);
-            UDP_TX_buf = pbuf_alloc(PBUF_TRANSPORT, UDP_TX_size, PBUF_RAM);
-            UDP_TX_level = 0;
-          }
+        if( UDP_TX_level + msg_len > UDP_TX_size )
+        {
+          UDP_TX_send( &UDP_TX_level );
+        }
 
-          pbuf_take_at( UDP_TX_buf, local_buffer, msg_len, UDP_TX_level);
-          UDP_TX_level += msg_len;
+        pbuf_take_at( UDP_TX_buf, local_buffer, msg_len, UDP_TX_level);
+        UDP_TX_level += msg_len;
       }
 
       /// the rest is debug errors check
@@ -607,33 +579,6 @@ int main(void)
         debug_index = 0;
       }
     }
-
-    /*
-    /// break UDP TX ring buffer into a bunch of UDP frames each smaller than 512 bytes and send them out
-    /// right now data is sent only when buffer is full
-    while( UDP_TX_ring.bytes_written > 0 )
-    {
-      uint16_t length = UDP_TX_ring.buffer_body[UDP_TX_ring.head];
-      if( index + length < 512 )
-      {
-         read_buffer(&UDP_TX_ring, &udp_out_buffer[index], length);
-         index += length;
-      }
-      else
-      {
-        //send buffer
-        struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, index, PBUF_RAM); // allocate LWIP memory for outgoing UDP packet
-        
-        if (p != NULL)
-        {
-          pbuf_take(p, (void *) udp_out_buffer, index);
-          udp_send(upcb, p);
-          pbuf_free(p);         
-          index = 0;
-        }
-      }
-    }
-    */
   }
   /* USER CODE END 3 */
 }
@@ -1277,7 +1222,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   {
     //HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_6);
     //TIM1_Callback();
-    timer_update_flag = 1;
   }
 }
 
@@ -1415,6 +1359,17 @@ uint8_t send_frame_SPI(void)
   }
   
   return 0;
+}
+
+void UDP_TX_send( uint16_t *UDP_TX_level )
+{
+  pbuf_realloc( UDP_TX_buf, *UDP_TX_level);
+
+  udp_send(upcb, UDP_TX_buf);
+
+  pbuf_free(UDP_TX_buf);
+  UDP_TX_buf = pbuf_alloc(PBUF_TRANSPORT, UDP_TX_size, PBUF_RAM);
+  *UDP_TX_level = 0;
 }
 
 // allocate dynamic memory of desired size in bytes

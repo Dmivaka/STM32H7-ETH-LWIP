@@ -175,58 +175,6 @@ void udp_client_connect(void)
   }
 }
 
-extern buffer_instance gaga;
-uint8_t debug_buf[128] = {0};
-
-void udp_client_send(void)
-{
-  // make a local copy of buffer variables to allow concurrent write access to the global buffer
-  uint16_t bytes = gaga.bytes_written;
-  uint16_t head0 = gaga.head;
-  uint16_t tail0 = gaga.tail;
-
-  if( bytes == 0 )
-  {
-    // no data to process
-    return ; 
-  }
-  
-  memset(debug_buf, 0, 128);
-
-  struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, bytes, PBUF_RAM); // allocate LWIP memory for outgoing UDP packet
-  
-  memcpy(debug_buf, p->payload, 128);
-    
-  if (p != NULL)
-  {
-    if( bytes < buf_size - head0 )
-    {
-      // memcpy in one step - written data gapless
-      pbuf_take(p, (void *) &gaga.buffer_body[head0], bytes);
-      memcpy(debug_buf, p->payload, 128);
-    }
-    else
-    {
-      // memcpy in two steps - data is divided in two parts - at the end and the beginning of circular buffer
-      pbuf_take(p, (void *) &gaga.buffer_body[head0], buf_size - head0);
-      pbuf_take_at(p, (void *) gaga.buffer_body, tail0, buf_size - head0);
-      memcpy(debug_buf, p->payload, 128);
-    }
-    
-    memcpy(debug_buf, p->payload, 128);
-
-    udp_send(upcb, p);
-    pbuf_free(p);
-    gaga.bytes_written -= bytes;
-    gaga.head = tail0;
-  }
-  else
-  {
-    // ran out of memory? 
-    Error_Handler();
-  }
-}
-
 //-----------------------------------------------
 extern queue spi_tx_queue;
 extern circular_heap_t spi_tx_heap;
