@@ -134,6 +134,7 @@ void enqueue( queue *q, item *n )
   if( q->head == NULL ) 
   {
     q->head = q->tail = n;
+    q->head->nexta = q->tail->nexta = NULL;
   }
   else
   {
