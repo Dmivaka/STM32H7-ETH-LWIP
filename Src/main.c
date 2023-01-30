@@ -545,7 +545,7 @@ int main(void)
       size_t size;
       uint8_t RxData[69];
       deserialize_can_frame( NULL, &identifier, &size, RxData, local_buffer);
-        
+      
       // separate frames into the LCM and UAVCAN -related buffers
       if( !parse_canard_frame( identifier, size, RxData ) )
       {
