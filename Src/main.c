@@ -730,7 +730,7 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.MessageRAMOffset = 0;
   hfdcan1.Init.StdFiltersNbr = 0;
   hfdcan1.Init.ExtFiltersNbr = 1;
-  hfdcan1.Init.RxFifo0ElmtsNbr = 32;
+  hfdcan1.Init.RxFifo0ElmtsNbr = 24;
   hfdcan1.Init.RxFifo0ElmtSize = FDCAN_DATA_BYTES_64;
   hfdcan1.Init.RxFifo1ElmtsNbr = 0;
   hfdcan1.Init.RxFifo1ElmtSize = FDCAN_DATA_BYTES_8;
@@ -738,7 +738,7 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.RxBufferSize = FDCAN_DATA_BYTES_8;
   hfdcan1.Init.TxEventsNbr = 0;
   hfdcan1.Init.TxBuffersNbr = 0;
-  hfdcan1.Init.TxFifoQueueElmtsNbr = 32;
+  hfdcan1.Init.TxFifoQueueElmtsNbr = 24;
   hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
   hfdcan1.Init.TxElmtSize = FDCAN_DATA_BYTES_64;
   if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK)
@@ -802,7 +802,7 @@ static void MX_FDCAN2_Init(void)
   hfdcan2.Init.MessageRAMOffset = 768;
   hfdcan2.Init.StdFiltersNbr = 0;
   hfdcan2.Init.ExtFiltersNbr = 1;
-  hfdcan2.Init.RxFifo0ElmtsNbr = 32;
+  hfdcan2.Init.RxFifo0ElmtsNbr = 24;
   hfdcan2.Init.RxFifo0ElmtSize = FDCAN_DATA_BYTES_64;
   hfdcan2.Init.RxFifo1ElmtsNbr = 0;
   hfdcan2.Init.RxFifo1ElmtSize = FDCAN_DATA_BYTES_8;
@@ -810,7 +810,7 @@ static void MX_FDCAN2_Init(void)
   hfdcan2.Init.RxBufferSize = FDCAN_DATA_BYTES_8;
   hfdcan2.Init.TxEventsNbr = 0;
   hfdcan2.Init.TxBuffersNbr = 0;
-  hfdcan2.Init.TxFifoQueueElmtsNbr = 32;
+  hfdcan2.Init.TxFifoQueueElmtsNbr = 24;
   hfdcan2.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
   hfdcan2.Init.TxElmtSize = FDCAN_DATA_BYTES_64;
   if (HAL_FDCAN_Init(&hfdcan2) != HAL_OK)
@@ -1279,7 +1279,12 @@ void HAL_FDCAN_TxFifoEmptyCallback(FDCAN_HandleTypeDef *hfdcan)
       
       push_can_frame( hfdcan, id, frame_len, tx_data_pointer);
       
-      circular_heap_free( can_tx_heaps[bus_num], dequeue( can_tx_queues[bus_num] ));
+      uint32_t primask_bit = __get_PRIMASK();       // backup PRIMASK bit
+      __disable_irq();                              // Disable all interrupts by setting PRIMASK bit on Cortex
+      
+        circular_heap_free( can_tx_heaps[bus_num], dequeue( can_tx_queues[bus_num] ));
+        
+        __set_PRIMASK(primask_bit);                   // Restore PRIMASK bit
     }
     else
     {
@@ -1310,7 +1315,7 @@ uint8_t push_can_frame( FDCAN_HandleTypeDef *handle, uint32_t id, uint8_t length
     {
       Error_Handler();
     }
-    HAL_Delay(10);
+    HAL_Delay(2);
   }
   else
   {
