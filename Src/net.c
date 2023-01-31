@@ -245,7 +245,7 @@ void distribute_vb_frame( uint8_t * vb_frame )
     __disable_irq();                          // Disable all interrupts by setting PRIMASK bit on Cortex
       // while we are accessing the buffer the SPI interrupt can occur - it will corrupt it. 
 
-    if( !get_queue_head( &sec_chip_tx_queue ) )
+    if( !get_queue_head( &sec_chip_tx_queue ) ) // if secondary buffer is empty we can fill the main SPI TX buffer
     {
       item* new_element = circular_heap_alloc( &spi_tx_heap, sizeof(void*) + frame_len + 5 );
       if( new_element != NULL )
@@ -254,7 +254,7 @@ void distribute_vb_frame( uint8_t * vb_frame )
         memcpy( &new_element->payload, vb_frame, frame_len + 5 );
         enqueue( &spi_tx_queue, new_element );
       }
-      else
+      else // if the secondary buffer is empty but the main is full - start to fill the secondary buffer
       {
         // main buffer is full and I have to write into the secondary 
         new_element = circular_heap_alloc( &sec_chip_tx_heap, sizeof(void*) + frame_len + 5 );
@@ -270,7 +270,7 @@ void distribute_vb_frame( uint8_t * vb_frame )
         }
       }
     }
-    else
+    else // if the secondary buffer contains data we cannot write data into the main buffer - it will ruin data reception order
     {
       // if secondary buffer is not empty - we only can fill it
       item* new_element = circular_heap_alloc( &sec_chip_tx_heap, sizeof(void*) + frame_len + 5 );
