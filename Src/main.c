@@ -74,9 +74,12 @@ TIM_HandleTypeDef htim7;
 /* USER CODE BEGIN PV */
 FDCAN_HandleTypeDef * FDCAN_Handles_Map[3] = {&hfdcan1, &hfdcan2, &hfdcan3};
 
-// the upper two kbytes of SRAM2 region
-#pragma location=0x30007800
-uint8_t SPI_TX_buf[1024] = {0};
+circular_heap_t spi_tx_heap;
+queue spi_tx_queue = {NULL, NULL};
+
+#pragma location=0x24000000
+uint8_t SPI_TX_buf[16384] = {0};
+
 #pragma location=0x30007C00
 uint8_t SPI_RX_body[1024] = {0};
 
@@ -191,9 +194,6 @@ uint8_t sec_chip_tx_buffer[12288] = {0};
 circular_heap_t sec_chip_tx_heap;
 queue sec_chip_tx_queue = {NULL, NULL};
 
-circular_heap_t spi_tx_heap;
-queue spi_tx_queue = {NULL, NULL};
-
 uint8_t can1_tx_buffer[4096] = {0};
 circular_heap_t can1_tx_heap;
 queue can1_tx_queue = {NULL, NULL};
@@ -222,7 +222,7 @@ struct pbuf *UDP_TX_buf = NULL;
 int main(void)
 {
   /* USER CODE BEGIN 1 */
-  circular_heap_init(&spi_tx_heap, SPI_TX_buf, 1024);
+  circular_heap_init(&spi_tx_heap, SPI_TX_buf, 16384);
   circular_heap_init(&sec_chip_tx_heap, sec_chip_tx_buffer, 12288);
 
   circular_heap_init(&can1_tx_heap, can1_tx_buffer, 4096);
@@ -283,10 +283,10 @@ int main(void)
   MPU_Config();
 
   /* Enable I-Cache---------------------------------------------------------*/
-  //SCB_EnableICache();
+  SCB_EnableICache();
 
   /* Enable D-Cache---------------------------------------------------------*/
-  //SCB_EnableDCache();
+  SCB_EnableDCache();
 
   /* MCU Configuration--------------------------------------------------------*/
 
@@ -299,15 +299,15 @@ int main(void)
 
   /* Configure the system clock */
   SystemClock_Config();
-  
+
 /* Configure the peripherals common clocks */
   PeriphCommonClock_Config();
-  
+
   /* USER CODE BEGIN SysInit */
   __HAL_RCC_D2SRAM1_CLK_ENABLE(); // have no idea how to do this from the CubeMX software.
   HAL_Delay(1000); // does not work without this line. I believe it's linked to lan8720 start-up time. 
   /* USER CODE END SysInit */
-  
+
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
@@ -567,6 +567,7 @@ int main(void)
       }
 
       /// the rest is debug errors check
+/*
       if( msg_len != 13 )
       {
         Error_Handler();
@@ -584,6 +585,7 @@ int main(void)
       {
         debug_index = 0;
       }
+*/
     }
     
     uint32_t primask_bit = __get_PRIMASK();   // backup PRIMASK bit
@@ -1468,6 +1470,15 @@ void MPU_Config(void)
   MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL1;
   MPU_InitStruct.IsShareable = MPU_ACCESS_SHAREABLE;
   MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
+
+  HAL_MPU_ConfigRegion(&MPU_InitStruct);
+
+  /** Initializes and configures the Region and the memory to be protected
+  */
+  MPU_InitStruct.Number = MPU_REGION_NUMBER3;
+  MPU_InitStruct.BaseAddress = 0x24000000;
+  MPU_InitStruct.Size = MPU_REGION_SIZE_128KB;
+  MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL0;
 
   HAL_MPU_ConfigRegion(&MPU_InitStruct);
   /* Enables the MPU */
