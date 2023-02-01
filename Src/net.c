@@ -179,9 +179,6 @@ void udp_client_connect(void)
 extern queue spi_tx_queue;
 extern circular_heap_t spi_tx_heap;
 
-extern queue sec_chip_tx_queue;
-extern circular_heap_t sec_chip_tx_heap;
-
 extern queue *can_tx_queues[3];
 extern circular_heap_t *can_tx_heaps[3];
 
@@ -239,51 +236,21 @@ void distribute_vb_frame( uint8_t * vb_frame )
     debug_counter++;
     // SPI transfer section. 
     // There's at least one frame ready to be processed. 
-    // If no outgoing SPI transfers happens (1st frame in series), load it directly into the SPI FIFO.
-    
+
     uint32_t primask_bit = __get_PRIMASK();   // backup PRIMASK bit
     __disable_irq();                          // Disable all interrupts by setting PRIMASK bit on Cortex
-      // while we are accessing the buffer the SPI interrupt can occur - it will corrupt it. 
+    // while we are accessing the buffer the SPI interrupt can occur - it will corrupt it. 
 
-    if( !get_queue_head( &sec_chip_tx_queue ) ) // if secondary buffer is empty we can fill the main SPI TX buffer
+    item* new_element = circular_heap_alloc( &spi_tx_heap, sizeof(void*) + frame_len + 5 );
+    if( new_element != NULL )
     {
-      item* new_element = circular_heap_alloc( &spi_tx_heap, sizeof(void*) + frame_len + 5 );
-      if( new_element != NULL )
-      {
-        // cool, sec buffer is empty and new data is written in the free space in the main buff
-        memcpy( &new_element->payload, vb_frame, frame_len + 5 );
-        enqueue( &spi_tx_queue, new_element );
-      }
-      else // if the secondary buffer is empty but the main is full - start to fill the secondary buffer
-      {
-        // main buffer is full and I have to write into the secondary 
-        new_element = circular_heap_alloc( &sec_chip_tx_heap, sizeof(void*) + frame_len + 5 );
-        if( new_element != NULL )
-        {
-          memcpy( &new_element->payload, vb_frame, frame_len + 5 );
-          enqueue( &sec_chip_tx_queue, new_element );
-        }
-        else
-        {
-          // both buffer are seem to be full - something went very wrong
-          Error_Handler();
-        }
-      }
+      memcpy( &new_element->payload, vb_frame, frame_len + 5 );
+      enqueue( &spi_tx_queue, new_element );
     }
-    else // if the secondary buffer contains data we cannot write data into the main buffer - it will ruin data reception order
+    else
     {
-      // if secondary buffer is not empty - we only can fill it
-      item* new_element = circular_heap_alloc( &sec_chip_tx_heap, sizeof(void*) + frame_len + 5 );
-      if( new_element != NULL )
-      {
-        memcpy( &new_element->payload, vb_frame, frame_len + 5 );
-        enqueue( &sec_chip_tx_queue, new_element );
-      }
-      else
-      {
-        // both buffer are seem to be full - something went very wrong
-        Error_Handler();
-      }
+      // buffer is full
+      Error_Handler();
     }
 
     __set_PRIMASK(primask_bit);               // Restore PRIMASK bit

@@ -190,10 +190,6 @@ extern struct udp_pcb *upcb;
 
 uint16_t response_recorder = 0;
 
-uint8_t sec_chip_tx_buffer[12288] = {0};
-circular_heap_t sec_chip_tx_heap;
-queue sec_chip_tx_queue = {NULL, NULL};
-
 uint8_t can1_tx_buffer[4096] = {0};
 circular_heap_t can1_tx_heap;
 queue can1_tx_queue = {NULL, NULL};
@@ -223,7 +219,6 @@ int main(void)
 {
   /* USER CODE BEGIN 1 */
   circular_heap_init(&spi_tx_heap, SPI_TX_buf, 16384);
-  circular_heap_init(&sec_chip_tx_heap, sec_chip_tx_buffer, 12288);
 
   circular_heap_init(&can1_tx_heap, can1_tx_buffer, 4096);
   circular_heap_init(&can2_tx_heap, can2_tx_buffer, 4096);
@@ -587,32 +582,6 @@ int main(void)
       }
 */
     }
-    
-    uint32_t primask_bit = __get_PRIMASK();   // backup PRIMASK bit
-    __disable_irq();                          // Disable all interrupts by setting PRIMASK bit on Cortex
-     
-      while( get_queue_head( &sec_chip_tx_queue ) ) 
-      {
-        char *extra_frame = get_queue_head( &sec_chip_tx_queue );
-        
-        item *new_element = circular_heap_alloc( &spi_tx_heap, sizeof(void*) + extra_frame[0] );
-        
-        if( new_element != NULL )
-        {
-          memcpy( new_element->payload, extra_frame, extra_frame[0] );
-          enqueue( &spi_tx_queue, new_element );
-          
-          circular_heap_free( &sec_chip_tx_heap, dequeue( &sec_chip_tx_queue ));
-
-          uint8_t *pointer = get_queue_head( &spi_tx_queue );
-        }
-        else
-        {
-          break ;
-        }
-      }
-    
-    __set_PRIMASK(primask_bit);               // Restore PRIMASK bit
   }
   /* USER CODE END 3 */
 }
