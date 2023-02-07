@@ -26,6 +26,21 @@
 #include "circ_buffer.h"
 #include "helpers.h"
 #include <string.h>
+
+#include "stm32h7xx_ll_gpio.h"
+#include "stm32h7xx_ll_spi.h"
+
+#include "lwip.h"
+#include "lwip/udp.h"
+
+#include "libcanard/canard.h"
+#include "uavcan/node/Heartbeat_1_0.h"
+#include "uavcan/primitive/array/Real32_1_0.h"
+
+#include "hl_command_msg.h"
+#include "hl_state_msg.h"
+
+#include "circular_heap.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -49,41 +64,151 @@ FDCAN_HandleTypeDef hfdcan2;
 FDCAN_HandleTypeDef hfdcan3;
 
 SPI_HandleTypeDef hspi1;
+SPI_HandleTypeDef hspi3;
+DMA_HandleTypeDef hdma_spi1_tx;
+DMA_HandleTypeDef hdma_spi3_rx;
 
 TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim7;
 
 /* USER CODE BEGIN PV */
+FDCAN_HandleTypeDef * FDCAN_Handles_Map[3] = {&hfdcan1, &hfdcan2, &hfdcan3};
+
+circular_heap_t spi_tx_heap;
+queue spi_tx_queue = {NULL, NULL};
+
+#pragma location=0x24000000
+uint8_t SPI_TX_buf[16384] = {0};
+
+#pragma location=0x30007C00
+uint8_t SPI_RX_body[1024] = {0};
+
+buffer_instance SPI_RX_buf = {0, NULL, 0, SPI_RX_body};
+
+CanardInstance 	canard; // This is the core structure that keeps all of the states and allocated resources of the library instance
+
+// each queue is bound to its dedicated can-bus - 3 on the main and 3 on the companion chip.
+CanardTxQueue 	queue0; // Prioritized transmission queue that keeps CAN frames destined for transmission via one CAN interface
+CanardTxQueue 	queue1;
+CanardTxQueue 	queue2;
+CanardTxQueue 	queue3;
+CanardTxQueue 	queue4;
+CanardTxQueue 	queue5;
+
+CanardTxQueue * TxQueuesMap[6] = { &queue0, &queue1, &queue2, &queue3, &queue4, &queue5 };
+
+//int8_t device_to_queue[12] = {1,1,2,2,3,3,4,4,5,5,6,6};
+int8_t device_to_queue[12] = {  1,  0, -1,
+                               -1, -1, -1,
+                               -1, -1, -1,
+                               -1, -1, -1}; // only null and first driver are enabled - the can1 and can0 buses respectevely
+
+uint16_t device_node_id[12] = {  10, 11, 12,
+                                 13, 14, 15,
+                                 16, 17, 18,
+                                 19, 20, 21 };
+
+uint16_t device_tx_port[12] = {  1000, 1010, 1020,
+                                 1030, 1040, 1050,
+                                 1060, 1070, 1080,
+                                 1090, 1100, 1200 };
+
+uint16_t device_rx_port[12] = {  1001, 1011, 1021,
+                                 1031, 1041, 1051,
+                                 1061, 1071, 1081,
+                                 1091, 1101, 1201 };
+
+CanardRxSubscription Device0_Sub;
+CanardRxSubscription Device1_Sub;
+CanardRxSubscription Device2_Sub;
+CanardRxSubscription Device3_Sub;
+CanardRxSubscription Device4_Sub;
+CanardRxSubscription Device5_Sub;
+CanardRxSubscription Device6_Sub;
+CanardRxSubscription Device7_Sub;
+CanardRxSubscription Device8_Sub;
+CanardRxSubscription Device9_Sub;
+CanardRxSubscription Device10_Sub;
+CanardRxSubscription Device11_Sub;
+
+/*
+CanardRxSubscription * CanardSubscriptionMap[12] = {  &Device0_Sub, &Device1_Sub, &Device2_Sub,
+                                                      &Device3_Sub, &Device4_Sub, &Device5_Sub,
+                                                      &Device6_Sub, &Device7_Sub, &Device8_Sub,
+                                                      &Device9_Sub, &Device10_Sub, &Device11_Sub };
+*/
+
+CanardRxSubscription * CanardSubscriptionMap[12] = {  &Device0_Sub, &Device1_Sub, NULL,
+                                                      NULL, NULL, NULL,
+                                                      NULL, NULL, NULL,
+                                                      NULL, NULL, NULL };
+
+extern uint8_t LCM_rx_flag;
+extern uint8_t LCM_tx_flag;
+extern hl_command_msg rx_lcm_msg;
+extern measurment tx_lcm_msg;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
+void PeriphCommonClock_Config(void);
 static void MPU_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_FDCAN1_Init(void);
 static void MX_FDCAN2_Init(void);
 static void MX_FDCAN3_Init(void);
 static void MX_SPI1_Init(void);
+static void MX_SPI3_Init(void);
+static void MX_TIM7_Init(void);
 /* USER CODE BEGIN PFP */
-uint8_t write_can_frame(buffer_instance * s, uint8_t src_bus, FDCAN_RxHeaderTypeDef * head, uint8_t *data);
-uint8_t read_can_frame(buffer_instance * s, FDCAN_TxHeaderTypeDef * head, uint8_t *data);
+uint8_t parse_canard_frame( uint32_t id, size_t size, void* payload);
+
+static void *memAllocate(CanardInstance *const canard, const size_t amount);
+static void memFree(CanardInstance *const canard, void *const pointer);
+
+void process_canard_TX_queue( uint8_t queue_num );
+
+void UDP_TX_send( uint16_t *UDP_TX_level );
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-uint8_t dummy_buffer[32] = {0};
-uint8_t more_dummy_buffer[128] = {0};
+extern uint64_t TIM7_ITs;
+uint64_t micros()
+{ 
+  return (uint64_t)(__HAL_TIM_GET_COUNTER(&htim7) + 50000u * TIM7_ITs);
+}
 
-buffer_instance gaga = {0, NULL, 0, NULL};
-uint8_t my_buffer[buf_size] = {0};
-uint8_t timer_update_flag = 0;
+uint32_t previos_char = 9000;
 
-buffer_instance bus1_circ_buff = {0, NULL, 0, NULL};
-uint8_t my_2nd_buffer[buf_size] = {0};
-uint16_t bus1_frames_stored = 0;
+uint8_t debug_collector[1024] = {0};
+uint32_t debug_index = 0;
 
-#pragma location=0x30004000
-uint8_t tx_buffer[512] = {0};
+extern struct udp_pcb *upcb;
+
+uint16_t response_recorder = 0;
+
+uint8_t can1_tx_buffer[4096] = {0};
+circular_heap_t can1_tx_heap;
+queue can1_tx_queue = {NULL, NULL};
+
+uint8_t can2_tx_buffer[4096] = {0};
+circular_heap_t can2_tx_heap;
+queue can2_tx_queue = {NULL, NULL};
+
+uint8_t can3_tx_buffer[4096] = {0};
+circular_heap_t can3_tx_heap;
+queue can3_tx_queue = {NULL, NULL};
+
+queue *can_tx_queues[3] = { &can1_tx_queue, &can2_tx_queue, &can3_tx_queue };
+circular_heap_t *can_tx_heaps[3] = { &can1_tx_heap, &can2_tx_heap, &can3_tx_heap };
+
+struct pbuf *UDP_TX_buf = NULL;
+#define UDP_TX_size 128
+
+//#define uavcan_en
 /* USER CODE END 0 */
 
 /**
@@ -93,10 +218,34 @@ uint8_t tx_buffer[512] = {0};
 int main(void)
 {
   /* USER CODE BEGIN 1 */
+  circular_heap_init(&spi_tx_heap, SPI_TX_buf, 16384);
+
+  circular_heap_init(&can1_tx_heap, can1_tx_buffer, 4096);
+  circular_heap_init(&can2_tx_heap, can2_tx_buffer, 4096);
+  circular_heap_init(&can3_tx_heap, can3_tx_buffer, 4096);
   
-  gaga.buffer_body = my_buffer;
-  bus1_circ_buff.buffer_body = my_2nd_buffer;
-    
+  canard = canardInit(&memAllocate, &memFree);	// Initialization of a canard instance
+  canard.node_id = 40;
+  
+  for( int i = 0; i < 6; i++ )
+  {
+    *TxQueuesMap[i] = canardTxInit( 10, CANARD_MTU_CAN_FD); // really we need 1 element only
+  }
+/*
+  for( int i = 0; i < 12; i++ )
+  {
+    if( CanardSubscriptionMap[i] != NULL )
+    {
+      if( canardRxSubscribe(    &canard,
+                                CanardTransferKindMessage,
+                                device_rx_port[i],
+                                uavcan_primitive_array_Real32_1_0_EXTENT_BYTES_,
+                                CANARD_DEFAULT_TRANSFER_ID_TIMEOUT_USEC,
+                                CanardSubscriptionMap[i] ) != 1 ){ Error_Handler(); }
+    }
+  }
+  */
+
   /*********************************************
 
   for( int i = 0; i < 32; i++ )
@@ -146,6 +295,9 @@ int main(void)
   /* Configure the system clock */
   SystemClock_Config();
 
+/* Configure the peripherals common clocks */
+  PeriphCommonClock_Config();
+
   /* USER CODE BEGIN SysInit */
   __HAL_RCC_D2SRAM1_CLK_ENABLE(); // have no idea how to do this from the CubeMX software.
   HAL_Delay(1000); // does not work without this line. I believe it's linked to lan8720 start-up time. 
@@ -153,22 +305,25 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_LWIP_Init();
+  MX_DMA_Init();
   MX_TIM1_Init();
   MX_FDCAN1_Init();
   MX_FDCAN2_Init();
   MX_FDCAN3_Init();
+  MX_LWIP_Init();
   MX_SPI1_Init();
+  MX_SPI3_Init();
+  MX_TIM7_Init();
   /* USER CODE BEGIN 2 */
+  uint16_t UDP_TX_level = 0;
+  UDP_TX_buf = pbuf_alloc(PBUF_TRANSPORT, UDP_TX_size, PBUF_RAM); // allocate LWIP memory for outgoing UDP packet
   
-  for( int i = 0; i < 512; i++)
-  {
-    tx_buffer[i] = i;
-  }
+  HAL_SPI_Receive_DMA(&hspi3, SPI_RX_body, 1024);
 
-  HAL_SPI_Transmit(&hspi1, tx_buffer, 512, 1000);
-  
   udp_client_connect();
+  udp_lcm_connect();
+  
+  HAL_TIM_Base_Start_IT(&htim7); // enable microseconds timesource
   HAL_TIM_Base_Start_IT(&htim1);
   
   if (HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_TX_FIFO_EMPTY, FDCAN_TX_BUFFER0 | FDCAN_TX_BUFFER1 | FDCAN_TX_BUFFER2) != HAL_OK)
@@ -178,25 +333,46 @@ int main(void)
   
   // Filter for messages from master to this dedicated device. 
   FDCAN_FilterTypeDef sFilterConfig;  
-  sFilterConfig.IdType = FDCAN_STANDARD_ID;
+  sFilterConfig.IdType = FDCAN_EXTENDED_ID;
   sFilterConfig.FilterIndex = 0;
   sFilterConfig.FilterType = FDCAN_FILTER_RANGE;
   sFilterConfig.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
   sFilterConfig.FilterID1 = 0x0;
-  sFilterConfig.FilterID2 = 0x7FF;
+  sFilterConfig.FilterID2 = 0x1FFFFFFF;  
   
-  if( HAL_FDCAN_ConfigFilter(&hfdcan1, &sFilterConfig) != HAL_OK ){  Error_Handler();  }  
-  if( HAL_FDCAN_ConfigFilter(&hfdcan2, &sFilterConfig) != HAL_OK ){  Error_Handler();  }
-  
-  // Configure global filter: Filter all remote frames with STD and EXT ID. Reject non matching frames with STD ID and EXT ID
-  if( HAL_FDCAN_ConfigGlobalFilter(&hfdcan1, FDCAN_REJECT, FDCAN_REJECT, FDCAN_FILTER_REMOTE, FDCAN_FILTER_REMOTE) != HAL_OK ){  Error_Handler();  }  
-  if( HAL_FDCAN_ConfigGlobalFilter(&hfdcan2, FDCAN_REJECT, FDCAN_REJECT, FDCAN_FILTER_REMOTE, FDCAN_FILTER_REMOTE) != HAL_OK ){  Error_Handler();  }
+  // iterate over three CAN bus handles and enable their parameters
+  for( int i = 0; i < 3; i++)
+  {
+    // choose one FDCAN Handle from the three available
+    FDCAN_HandleTypeDef * FDCAN_Handle = FDCAN_Handles_Map[i];
+    
+    if( FDCAN_Handle != NULL )
+    {
+      // Configure CAN frames filtering 
+      if( HAL_FDCAN_ConfigFilter(FDCAN_Handle, &sFilterConfig) != HAL_OK ){ Error_Handler(); }  
+      
+      // Configure global filter: Filter all remote frames with STD and EXT ID. Reject non matching frames with STD ID and EXT ID
+      if( HAL_FDCAN_ConfigGlobalFilter(FDCAN_Handle, FDCAN_REJECT, FDCAN_REJECT, FDCAN_FILTER_REMOTE, FDCAN_FILTER_REMOTE) != HAL_OK ){ Error_Handler(); }
+      
+      // Configure and enable Tx Delay Compensation, required for BRS mode.
+      if( HAL_FDCAN_ConfigTxDelayCompensation(FDCAN_Handle, 5, 0) != HAL_OK){ Error_Handler(); }
+      if( HAL_FDCAN_EnableTxDelayCompensation(FDCAN_Handle) != HAL_OK){ Error_Handler(); }
+      
+      // Activate Rx FIFO 0 new message notification
+      //if( HAL_FDCAN_ActivateNotification(FDCAN_Handle, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK ){ Error_Handler(); }      
+      
+      // Activate TX FIFO empty notification
+      if( HAL_FDCAN_ActivateNotification( FDCAN_Handle, 
+                                          FDCAN_IT_TX_FIFO_EMPTY, 
+                                          FDCAN_TX_BUFFER0 | FDCAN_TX_BUFFER1 | FDCAN_TX_BUFFER2) != HAL_OK )
+                                          { Error_Handler(); }
 
-  if( HAL_FDCAN_Start(&hfdcan1) != HAL_OK ){  Error_Handler();  }  
-  if( HAL_FDCAN_Start(&hfdcan2) != HAL_OK ){  Error_Handler();  }
-
+      // Start FDCAN periphery
+      if( HAL_FDCAN_Start(FDCAN_Handle) != HAL_OK ){ Error_Handler(); }
+    }
+  }
   ///////////////////////////////////////////////////////////////////////////
-
+  
   FDCAN_TxHeaderTypeDef TxHeader;
   uint8_t data[8] = {'a','b','c','d','e','f','g','h'};
   
@@ -204,7 +380,7 @@ int main(void)
   {
     // Add message to Tx FIFO 
     TxHeader.Identifier = 0x1;
-    TxHeader.IdType = FDCAN_STANDARD_ID;
+    TxHeader.IdType = FDCAN_EXTENDED_ID;
     TxHeader.TxFrameType = FDCAN_DATA_FRAME;
     TxHeader.DataLength = FDCAN_DLC_BYTES_8;
     TxHeader.ErrorStateIndicator = FDCAN_ESI_PASSIVE;
@@ -220,27 +396,191 @@ int main(void)
   else
   {
 
-  }  
+  }
+  
+  /*
+  CanardRxSubscription heartbeat_msg_subscription;
+  if( canardRxSubscribe(        &canard,
+                                CanardTransferKindMessage,
+                                uavcan_node_Heartbeat_1_0_FIXED_PORT_ID_,
+                                uavcan_node_Heartbeat_1_0_EXTENT_BYTES_,
+                                CANARD_DEFAULT_TRANSFER_ID_TIMEOUT_USEC,
+                                &heartbeat_msg_subscription) != 1 ){ Error_Handler(); }  
+  */
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  uint8_t message_transfer = 0;
+  uint32_t timestamp = HAL_GetTick();
   while (1)
   {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    MX_LWIP_Process();
-    if( gaga.bytes_written > 70 )
+    if( HAL_GetTick() > timestamp )
     {
-      udp_client_send();
-      __HAL_TIM_SET_COUNTER(&htim1, 0);
+      //LL_GPIO_SetOutputPin(GPIOD, LL_GPIO_PIN_6);
+      //HAL_SPI_Transmit_DMA(&hspi1, SPI_TX_buf, 512);
+      
+      //conke(); // debug transmition of sample data
+      timestamp += 1000;
+      
+      if( UDP_TX_level > 0 )
+      {
+        UDP_TX_send( &UDP_TX_level );
+      }
     }
-    else if( timer_update_flag )
+    
+    MX_LWIP_Process();
+    
+    if( LCM_rx_flag )
     {
-      udp_client_send();
-      timer_update_flag = 0;
+      uint8_t c_serialized[uavcan_primitive_array_Real32_1_0_EXTENT_BYTES_] = {0};
+      
+      uavcan_primitive_array_Real32_1_0 uavcan_tx_array;
+      uavcan_tx_array.value.count = 5;
+      
+      for( int i = 0; i < 12; i++)
+      {
+        if( device_to_queue[i] >= 0 ) // check if selected drive is ebabled 
+        {
+          uavcan_tx_array.value.elements[0] = rx_lcm_msg.act[i].position;
+          uavcan_tx_array.value.elements[1] = rx_lcm_msg.act[i].velocity;
+          uavcan_tx_array.value.elements[2] = rx_lcm_msg.act[i].torque;
+          uavcan_tx_array.value.elements[3] = rx_lcm_msg.act[i].kp;
+          uavcan_tx_array.value.elements[4] = rx_lcm_msg.act[i].kd;
+          
+          size_t c_serialized_size = uavcan_primitive_array_Real32_1_0_EXTENT_BYTES_;
+
+          if ( uavcan_primitive_array_Real32_1_0_serialize_( &uavcan_tx_array, c_serialized, &c_serialized_size) < 0)
+          {
+            Error_Handler();
+          }
+          
+          const CanardTransferMetadata transfer_metadata = {    .priority       = CanardPriorityHigh,
+                                                                .transfer_kind  = CanardTransferKindMessage,
+                                                                .port_id        = device_tx_port[i],
+                                                                .remote_node_id = CANARD_NODE_ID_UNSET,
+                                                                .transfer_id    = message_transfer }; 
+
+          if(canardTxPush(  TxQueuesMap[device_to_queue[i]],
+                            &canard,
+                            0,
+                            &transfer_metadata,
+                            c_serialized_size,
+                            c_serialized) < 0 )
+                            {
+                              Error_Handler();
+                            }
+          
+          process_canard_TX_queue( device_to_queue[i] );
+        }
+      }
+      
+      message_transfer++ ;
+      LCM_rx_flag = 0;
+      
+      response_recorder = 0;
+    }
+    
+    if( LCM_tx_flag )
+    {
+      conke();
+      LCM_tx_flag = 0;
+    }
+
+    /// retrieve and process frames from the on-chip FDCAN peripherals
+    for( int i = 0; i < 3; i++)
+    {
+      while( HAL_FDCAN_GetRxFifoFillLevel(FDCAN_Handles_Map[i], FDCAN_RX_FIFO0) > 0 )
+      {
+        FDCAN_RxHeaderTypeDef Header;
+        uint8_t RxData[64];
+    
+        if (HAL_FDCAN_GetRxMessage(FDCAN_Handles_Map[i], FDCAN_RX_FIFO0, &Header, RxData) != HAL_OK){ Error_Handler(); }
+
+        // separate frames into the LCM and UAVCAN -related buffers
+        if( !parse_canard_frame( Header.Identifier, LengthDecoder(Header.DataLength), RxData ) )
+        {
+          // the canard frames filter said it is not the canard frame and returned 0.
+          // we have to put this frame untouched into UDP TX chain
+          uint8_t local_buffer[69] = {0};
+          uint8_t msg_len = serialize_can_frame(  1, 
+                                                  Header.Identifier, 
+                                                  LengthDecoder(Header.DataLength), 
+                                                  RxData, 
+                                                  local_buffer);
+          if( UDP_TX_level + msg_len > UDP_TX_size )
+          {
+            UDP_TX_send( &UDP_TX_level );
+          }
+
+          pbuf_take_at( UDP_TX_buf, local_buffer, msg_len, UDP_TX_level);
+          UDP_TX_level += msg_len;
+        }
+      }
+    }
+    
+    /// processing of the serialized FDCAN frames from companion chip (SPI RX chain)
+    while( SPI_RX_buf.bytes_written > 0 )
+    {
+      uint8_t local_buffer[69] = {0};
+      uint8_t msg_len = 0;
+      
+      uint32_t primask_bit = __get_PRIMASK();  // backup PRIMASK bit
+      __disable_irq();                  // Disable all interrupts by setting PRIMASK bit on Cortex
+      
+        msg_len = SPI_RX_buf.buffer_body[SPI_RX_buf.head]; // get the frame length, it's located at the beginning of new frame in the buffer
+        if( msg_len > SPI_RX_buf.bytes_written )
+        {
+          // buffer is corrupted
+          Error_Handler();
+        }
+        read_buffer(&SPI_RX_buf, local_buffer, msg_len);
+        
+      __set_PRIMASK(primask_bit);     // Restore PRIMASK bit
+
+      uint32_t identifier;
+      size_t size;
+      uint8_t RxData[69];
+      deserialize_can_frame( NULL, &identifier, &size, RxData, local_buffer);
+      
+      // separate frames into the LCM and UAVCAN -related buffers
+      if( !parse_canard_frame( identifier, size, RxData ) )
+      {
+        // the canard frames filter said it is not the canard frame and returned 0.
+        // we have to put this frame untouched into UDP TX chain
+        if( UDP_TX_level + msg_len > UDP_TX_size )
+        {
+          UDP_TX_send( &UDP_TX_level );
+        }
+
+        pbuf_take_at( UDP_TX_buf, local_buffer, msg_len, UDP_TX_level);
+        UDP_TX_level += msg_len;
+      }
+
+      /// the rest is debug errors check
+/*
+      if( msg_len != 13 )
+      {
+        Error_Handler();
+      }
+
+      if( previos_char == local_buffer[10] )
+      {
+        Error_Handler();
+      }
+      previos_char = local_buffer[10];
+      
+      debug_collector[debug_index] = previos_char;
+      debug_index++;
+      if( debug_index > 1023 )
+      {
+        debug_index = 0;
+      }
+*/
     }
   }
   /* USER CODE END 3 */
@@ -309,6 +649,32 @@ void SystemClock_Config(void)
 }
 
 /**
+  * @brief Peripherals Common Clock Configuration
+  * @retval None
+  */
+void PeriphCommonClock_Config(void)
+{
+  RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
+
+  /** Initializes the peripherals clock
+  */
+  PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_SPI3|RCC_PERIPHCLK_SPI1;
+  PeriphClkInitStruct.PLL2.PLL2M = 1;
+  PeriphClkInitStruct.PLL2.PLL2N = 40;
+  PeriphClkInitStruct.PLL2.PLL2P = 2;
+  PeriphClkInitStruct.PLL2.PLL2Q = 2;
+  PeriphClkInitStruct.PLL2.PLL2R = 2;
+  PeriphClkInitStruct.PLL2.PLL2RGE = RCC_PLL2VCIRANGE_3;
+  PeriphClkInitStruct.PLL2.PLL2VCOSEL = RCC_PLL2VCOWIDE;
+  PeriphClkInitStruct.PLL2.PLL2FRACN = 0;
+  PeriphClkInitStruct.Spi123ClockSelection = RCC_SPI123CLKSOURCE_PLL2;
+  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
+
+/**
   * @brief FDCAN1 Initialization Function
   * @param None
   * @retval None
@@ -326,7 +692,7 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Instance = FDCAN1;
   hfdcan1.Init.FrameFormat = FDCAN_FRAME_FD_BRS;
   hfdcan1.Init.Mode = FDCAN_MODE_NORMAL;
-  hfdcan1.Init.AutoRetransmission = DISABLE;
+  hfdcan1.Init.AutoRetransmission = ENABLE;
   hfdcan1.Init.TransmitPause = ENABLE;
   hfdcan1.Init.ProtocolException = DISABLE;
   hfdcan1.Init.NominalPrescaler = 1;
@@ -338,9 +704,9 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.DataTimeSeg1 = 5;
   hfdcan1.Init.DataTimeSeg2 = 4;
   hfdcan1.Init.MessageRAMOffset = 0;
-  hfdcan1.Init.StdFiltersNbr = 1;
-  hfdcan1.Init.ExtFiltersNbr = 0;
-  hfdcan1.Init.RxFifo0ElmtsNbr = 32;
+  hfdcan1.Init.StdFiltersNbr = 0;
+  hfdcan1.Init.ExtFiltersNbr = 1;
+  hfdcan1.Init.RxFifo0ElmtsNbr = 24;
   hfdcan1.Init.RxFifo0ElmtSize = FDCAN_DATA_BYTES_64;
   hfdcan1.Init.RxFifo1ElmtsNbr = 0;
   hfdcan1.Init.RxFifo1ElmtSize = FDCAN_DATA_BYTES_8;
@@ -348,7 +714,7 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.RxBufferSize = FDCAN_DATA_BYTES_8;
   hfdcan1.Init.TxEventsNbr = 0;
   hfdcan1.Init.TxBuffersNbr = 0;
-  hfdcan1.Init.TxFifoQueueElmtsNbr = 32;
+  hfdcan1.Init.TxFifoQueueElmtsNbr = 24;
   hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
   hfdcan1.Init.TxElmtSize = FDCAN_DATA_BYTES_64;
   if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK)
@@ -398,7 +764,7 @@ static void MX_FDCAN2_Init(void)
   hfdcan2.Instance = FDCAN2;
   hfdcan2.Init.FrameFormat = FDCAN_FRAME_FD_BRS;
   hfdcan2.Init.Mode = FDCAN_MODE_NORMAL;
-  hfdcan2.Init.AutoRetransmission = DISABLE;
+  hfdcan2.Init.AutoRetransmission = ENABLE;
   hfdcan2.Init.TransmitPause = ENABLE;
   hfdcan2.Init.ProtocolException = DISABLE;
   hfdcan2.Init.NominalPrescaler = 1;
@@ -410,9 +776,9 @@ static void MX_FDCAN2_Init(void)
   hfdcan2.Init.DataTimeSeg1 = 5;
   hfdcan2.Init.DataTimeSeg2 = 4;
   hfdcan2.Init.MessageRAMOffset = 768;
-  hfdcan2.Init.StdFiltersNbr = 1;
-  hfdcan2.Init.ExtFiltersNbr = 0;
-  hfdcan2.Init.RxFifo0ElmtsNbr = 32;
+  hfdcan2.Init.StdFiltersNbr = 0;
+  hfdcan2.Init.ExtFiltersNbr = 1;
+  hfdcan2.Init.RxFifo0ElmtsNbr = 24;
   hfdcan2.Init.RxFifo0ElmtSize = FDCAN_DATA_BYTES_64;
   hfdcan2.Init.RxFifo1ElmtsNbr = 0;
   hfdcan2.Init.RxFifo1ElmtSize = FDCAN_DATA_BYTES_8;
@@ -420,7 +786,7 @@ static void MX_FDCAN2_Init(void)
   hfdcan2.Init.RxBufferSize = FDCAN_DATA_BYTES_8;
   hfdcan2.Init.TxEventsNbr = 0;
   hfdcan2.Init.TxBuffersNbr = 0;
-  hfdcan2.Init.TxFifoQueueElmtsNbr = 32;
+  hfdcan2.Init.TxFifoQueueElmtsNbr = 24;
   hfdcan2.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
   hfdcan2.Init.TxElmtSize = FDCAN_DATA_BYTES_64;
   if (HAL_FDCAN_Init(&hfdcan2) != HAL_OK)
@@ -527,7 +893,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_4;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -549,6 +915,53 @@ static void MX_SPI1_Init(void)
   /* USER CODE BEGIN SPI1_Init 2 */
 
   /* USER CODE END SPI1_Init 2 */
+
+}
+
+/**
+  * @brief SPI3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SPI3_Init(void)
+{
+
+  /* USER CODE BEGIN SPI3_Init 0 */
+
+  /* USER CODE END SPI3_Init 0 */
+
+  /* USER CODE BEGIN SPI3_Init 1 */
+
+  /* USER CODE END SPI3_Init 1 */
+  /* SPI3 parameter configuration*/
+  hspi3.Instance = SPI3;
+  hspi3.Init.Mode = SPI_MODE_SLAVE;
+  hspi3.Init.Direction = SPI_DIRECTION_2LINES_RXONLY;
+  hspi3.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi3.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi3.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi3.Init.NSS = SPI_NSS_SOFT;
+  hspi3.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi3.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi3.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi3.Init.CRCPolynomial = 0x0;
+  hspi3.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
+  hspi3.Init.NSSPolarity = SPI_NSS_POLARITY_LOW;
+  hspi3.Init.FifoThreshold = SPI_FIFO_THRESHOLD_01DATA;
+  hspi3.Init.TxCRCInitializationPattern = SPI_CRC_INITIALIZATION_ALL_ZERO_PATTERN;
+  hspi3.Init.RxCRCInitializationPattern = SPI_CRC_INITIALIZATION_ALL_ZERO_PATTERN;
+  hspi3.Init.MasterSSIdleness = SPI_MASTER_SS_IDLENESS_00CYCLE;
+  hspi3.Init.MasterInterDataIdleness = SPI_MASTER_INTERDATA_IDLENESS_00CYCLE;
+  hspi3.Init.MasterReceiverAutoSusp = SPI_MASTER_RX_AUTOSUSP_DISABLE;
+  hspi3.Init.MasterKeepIOState = SPI_MASTER_KEEP_IO_STATE_DISABLE;
+  hspi3.Init.IOSwap = SPI_IO_SWAP_DISABLE;
+  if (HAL_SPI_Init(&hspi3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN SPI3_Init 2 */
+
+  /* USER CODE END SPI3_Init 2 */
 
 }
 
@@ -600,12 +1013,70 @@ static void MX_TIM1_Init(void)
 }
 
 /**
+  * @brief TIM7 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM7_Init(void)
+{
+
+  /* USER CODE BEGIN TIM7_Init 0 */
+
+  /* USER CODE END TIM7_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM7_Init 1 */
+
+  /* USER CODE END TIM7_Init 1 */
+  htim7.Instance = TIM7;
+  htim7.Init.Prescaler = 240;
+  htim7.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim7.Init.Period = 50000;
+  htim7.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim7) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim7, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM7_Init 2 */
+
+  /* USER CODE END TIM7_Init 2 */
+
+}
+
+/**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Stream0_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream0_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream0_IRQn);
+  /* DMA1_Stream1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream1_IRQn);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
   */
 static void MX_GPIO_Init(void)
 {
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOH_CLK_ENABLE();
@@ -614,136 +1085,215 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_6, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin : PD0 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PD6 */
+  GPIO_InitStruct.Pin = GPIO_PIN_6;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+
 }
 
 /* USER CODE BEGIN 4 */
+uint16_t findDeviceIndex(uint16_t *array, size_t size, uint16_t target) 
+{
+    uint16_t i=0;
+    while((i<size) && (array[i] != target)) i++;
+
+    return (i<size) ? (i) : (-1);
+}
+
+uint8_t parse_canard_frame( uint32_t id, size_t size, void* payload)
+{
+  // parsing is not performed if uavcan is disabled
+  #ifndef uavcan_en
+    return 0;
+  #endif
+    
+  CanardFrame rxf;
+  rxf.extended_can_id = id;
+  rxf.payload_size = size;
+  rxf.payload = payload;
+
+  CanardRxSubscription* out_subscription = NULL;
+  CanardRxTransfer transfer;
+  
+  int8_t result = canardRxAccept(       &canard,
+                                        micros(),
+                                        &rxf,
+                                        0,
+                                        &transfer,
+                                        &out_subscription);
+  
+  if( out_subscription != NULL ) // if we did subscribe to this subject we keep the frame and wait for the completion of transfer
+  {
+    if( result == 1 ) // process message if it is the complete transfer
+    {
+      uint16_t index = findDeviceIndex( (uint16_t *)device_rx_port, 12, (uint16_t)transfer.metadata.port_id );
+      
+      if( device_node_id[index] == transfer.metadata.remote_node_id )
+      {
+        uavcan_primitive_array_Real32_1_0 array;
+        size_t array_ser_buf_size = uavcan_primitive_array_Real32_1_0_EXTENT_BYTES_;
+
+        if ( uavcan_primitive_array_Real32_1_0_deserialize_( &array, transfer.payload, &array_ser_buf_size) < 0 )
+        {
+          Error_Handler();
+        }
+
+        tx_lcm_msg.act[index].position = array.value.elements[0];
+        tx_lcm_msg.act[index].velocity = array.value.elements[1];
+        tx_lcm_msg.act[index].torque = array.value.elements[2];
+        
+        response_recorder |= 1UL << index; // set bit corresponding to the device answered
+
+        // check if every device returned an answer
+        if( response_recorder == 0x3 )
+        {
+          LCM_tx_flag = 1;
+          
+          response_recorder = 0;
+        }
+      }
+      else
+      {
+        Error_Handler();
+      }
+      // parse the transfer and load value into the TX LCM message 
+      //if( transfer.metadata.remote_node_id == 1 ) // something happens I quess
+      canard.memory_free(&canard, transfer.payload);      // Deallocate the dynamic memory afterwards.
+      return 2;
+    }
+    else
+    {
+      // the frame is UAVCAN related, but it does not complete any transfer - do nothing for now. 
+      return 1;
+    }
+  }
+  else // we did not subscribe to this subject - pass it up
+  {
+    return 0;
+  }
+}
+
+// returns the size of serialized message in bytes
+uint8_t serialize_can_frame( uint8_t bus, uint32_t id, size_t size, uint8_t* src, uint8_t* dst)
+{
+  dst[0] = size + 5; // the first byte holds the full length of serialized frame
+
+  uint32_t bus_id = encode_bus_id( bus, id );
+  memcpy( &dst[1], &bus_id, 4);
+  if( src != NULL )
+  {
+    memcpy( &dst[5], src, size);
+  }
+  return size + 5;
+}
+
+void *deserialize_can_frame( uint8_t *bus, uint32_t *id, size_t *size, uint8_t* dst, uint8_t* src)
+{
+  *size = src[0] - 5;
+  
+  *bus = decode_bus_num( *(uint32_t*)&src[1] );
+  *id = decode_can_id( *(uint32_t*)&src[1] );
+  
+  // in case the destination pointer is zero, just unpacks the service info
+  if( dst != NULL )
+  {
+    memcpy( dst, &src[5], *size);
+  }
+  
+  return &src[5];
+}
+
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   if( htim->Instance == TIM1 )
   {
     //HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_6);
     //TIM1_Callback();
-    timer_update_flag = 1;
   }
 }
 
-void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
+// https://stackoverflow.com/a/25004214
+uint8_t findIndex(FDCAN_HandleTypeDef *array, size_t size, FDCAN_HandleTypeDef* target) 
 {
-  FDCAN_RxHeaderTypeDef RxHeader = {0};
-  uint8_t RxData[64];
-  uint8_t bus = 0;
+    uint8_t i=0;
+    while((i<size) && (&array[i] != target)) i++;
 
-  if( hfdcan->Instance == FDCAN1 )
-  {
-    bus = 1;
-    // Retrieve message from Rx FIFO 0 
-    if (HAL_FDCAN_GetRxMessage(&hfdcan1, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK)
-    {
-      Error_Handler();
-    }
-  }
-  else if( hfdcan->Instance == FDCAN2 )
-  {
-    bus = 2;
-    // Retrieve message from Rx FIFO 0 
-    if (HAL_FDCAN_GetRxMessage(&hfdcan2, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK)
-    {
-      Error_Handler();
-    }
-  }
-  else if( hfdcan->Instance == FDCAN3 )
-  {
-    bus = 3;
-    // Retrieve message from Rx FIFO 0 
-    if (HAL_FDCAN_GetRxMessage(&hfdcan3, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK)
-    {
-      Error_Handler();
-    }
-  }
-  else
-  {
-    Error_Handler();
-  }
-
-  write_can_frame(&gaga, bus, &RxHeader, RxData);  
-
-  return ;
+    return (i<size) ? (i) : (-1);
 }
-
-uint8_t local_buffer[69] = {0};
 
 void HAL_FDCAN_TxFifoEmptyCallback(FDCAN_HandleTypeDef *hfdcan)
 {
-  uint8_t free_level = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1);
-  while( free_level != 0 && bus1_frames_stored > 0 )
+  // this callback shouldnt be called fof disabled CAN buses, so no need to check for NULL pointer
+  
+  // find bus number from the handle name 
+  uint8_t bus_num = findIndex(*FDCAN_Handles_Map, 3, hfdcan);
+  
+  while( HAL_FDCAN_GetTxFifoFreeLevel(hfdcan) != 0  )
   {
-    uint8_t full_frame_length = bus1_circ_buff.buffer_body[bus1_circ_buff.head]; // the length of the frame is stored in it's head
-    
-    if( read_buffer(&bus1_circ_buff, local_buffer, full_frame_length) )
+    char * vb_frame = get_queue_head( can_tx_queues[bus_num] );
+    if( vb_frame != NULL )
     {
-      return ;
-    }
-    
-    bus1_frames_stored--;
+      uint8_t bus;
+      uint32_t id;
+      size_t frame_len;
 
-    if( push_can_frame( local_buffer, full_frame_length) == 1 )
-    {
-      uint32_t sosiska = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1);
-      Error_Handler();
+      uint8_t *tx_data_pointer = deserialize_can_frame( &bus, &id, &frame_len, NULL, vb_frame); // only extracts service info
+      
+      push_can_frame( hfdcan, id, frame_len, tx_data_pointer);
+      
+      uint32_t primask_bit = __get_PRIMASK();       // backup PRIMASK bit
+      __disable_irq();                              // Disable all interrupts by setting PRIMASK bit on Cortex
+      
+        circular_heap_free( can_tx_heaps[bus_num], dequeue( can_tx_queues[bus_num] ));
+        
+        __set_PRIMASK(primask_bit);                   // Restore PRIMASK bit
     }
-    
-    free_level = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1);
+    else
+    {
+      break ;
+    }
   }
   
   return ;
 }
 
-// push VB CAN frame into CAN FIFO
-uint8_t push_can_frame( uint8_t *frame_data, uint8_t frame_full_size)
+// push CAN frame into CAN FIFO
+uint8_t push_can_frame( FDCAN_HandleTypeDef *handle, uint32_t id, uint8_t length, uint8_t *payload)
 {
-  uint32_t bus_id = 0;
-  memcpy(&bus_id, &frame_data[1], 4);
-
-  uint8_t bus_num = decode_bus_num( bus_id );
-  uint32_t id = decode_can_id( bus_id );    
-
-  FDCAN_HandleTypeDef *hfdcan_ptr;
-  
-  if( bus_num == 1 )
-  {
-    hfdcan_ptr = &hfdcan1;
-  }
-  else if( bus_num == 2 )
-  {
-    hfdcan_ptr = &hfdcan2;
-  }
-  else if( bus_num == 3 )
-  {
-    hfdcan_ptr = &hfdcan3;
-  }
-  else
-  {
-    Error_Handler();
-  }
-  
-  if (HAL_FDCAN_GetTxFifoFreeLevel(hfdcan_ptr) != 0)
+  if (HAL_FDCAN_GetTxFifoFreeLevel(handle) != 0)
   {
     FDCAN_TxHeaderTypeDef TxHeader;
     // Add message to Tx FIFO 
     TxHeader.Identifier = id;
-    TxHeader.IdType = FDCAN_STANDARD_ID;
+    TxHeader.IdType = FDCAN_EXTENDED_ID;
     TxHeader.TxFrameType = FDCAN_DATA_FRAME;
-    TxHeader.DataLength = LengthCoder( frame_full_size - 5 );
+    TxHeader.DataLength = LengthCoder( length );
     TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
     TxHeader.BitRateSwitch = FDCAN_BRS_ON;
     TxHeader.FDFormat = FDCAN_FD_CAN;
     TxHeader.TxEventFifoControl = FDCAN_STORE_TX_EVENTS;
     TxHeader.MessageMarker = 0x00;
-    if (HAL_FDCAN_AddMessageToTxFifoQ(hfdcan_ptr, &TxHeader, &frame_data[5]) != HAL_OK)
+    if (HAL_FDCAN_AddMessageToTxFifoQ(handle, &TxHeader, payload) != HAL_OK)
     {
       Error_Handler();
     }
-    //HAL_Delay(1);
+    HAL_Delay(2);
   }
   else
   {
@@ -753,40 +1303,93 @@ uint8_t push_can_frame( uint8_t *frame_data, uint8_t frame_full_size)
   return 0;
 }
 
-uint8_t write_can_frame(buffer_instance * s, uint8_t src_bus, FDCAN_RxHeaderTypeDef * head, uint8_t *data)
+void process_canard_TX_queue( uint8_t queue_num )
 {
-  uint8_t can_message_length = LengthDecoder( head->DataLength ) + 5; // together with service bytes
-  
-  write_buffer(s, &can_message_length, 1); // write message length
-  
-  can_message_length -= 5; // 25 bytes with the service info
+  // Look at top of the TX queue of individual CAN frames
+  for (const CanardTxQueueItem* ti = NULL; (ti = canardTxPeek( TxQueuesMap[queue_num] )) != NULL;)
+  {
+    if ((0U == ti->tx_deadline_usec) || (ti->tx_deadline_usec > micros()))  // Check the deadline.
+    {
+      uint8_t vb_frame[69];
+      uint8_t vb_frame_len = ti->frame.payload_size + 5;
+      vb_frame[0] = vb_frame_len;
 
-  uint32_t id = head->Identifier;
-  uint32_t bus_id = encode_bus_id( src_bus, id );
+      uint8_t bus_num = queue_num;
+      
+      uint32_t id = ti->frame.extended_can_id;
+      uint32_t bus_id = encode_bus_id( bus_num, id );
+      
+      memcpy( &vb_frame[1], &bus_id, 4);
+      memcpy( &vb_frame[5], (uint8_t *)ti->frame.payload, ti->frame.payload_size);
+      
+      distribute_vb_frame( vb_frame );
+    }
+    // After the frame is transmitted or if it has timed out while waiting, pop it from the queue and deallocate:
+    canard.memory_free(&canard, canardTxPop( TxQueuesMap[queue_num], ti));
+  }
+}
 
-  write_buffer(s, (uint8_t*)&bus_id, 4); // write message length
-  write_buffer(s, data, can_message_length); // write message length
+volatile uint16_t zhazha = 0;
+
+void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
+{
+  if( hspi->Instance == SPI1 )
+  {
+    circular_heap_free( &spi_tx_heap, dequeue( &spi_tx_queue ));
+    send_frame_SPI();
+    zhazha++;
+  }
+}
+
+// push VB CAN frame into CAN FIFO
+uint8_t send_frame_SPI(void)
+{
+  if( !LL_SPI_IsActiveMasterTransfer(SPI1) )
+  {
+    char *payload = get_queue_head( &spi_tx_queue );
+    if( payload != NULL )
+    {
+      // bind payload to SPI DMA transfer
+      uint8_t data_len = payload[0];
+      
+      if( data_len != 13 ){     Error_Handler();        }
+      
+      LL_GPIO_SetOutputPin(GPIOD, LL_GPIO_PIN_6);
+      HAL_SPI_Transmit_DMA(&hspi1, payload, data_len);      
+    }
+    else
+    {
+      // buffer's empty!
+      //while(1);
+    }
+  }
   
   return 0;
 }
 
-uint8_t read_can_frame(buffer_instance * s, FDCAN_TxHeaderTypeDef * head, uint8_t *data)
+void UDP_TX_send( uint16_t *UDP_TX_level )
 {
-  uint8_t can_message_length = 0;
-  uint32_t bus_id = 0;
-  uint8_t bus = 0;
-  uint32_t id = 0;
-  
-  read_buffer(s, &can_message_length, 1);
-  can_message_length -= 5;
-  read_buffer(s, (uint8_t *)&bus_id, 4);
-  read_buffer(s, data, can_message_length);
+  pbuf_realloc( UDP_TX_buf, *UDP_TX_level);
 
-  head->DataLength = LengthCoder( can_message_length );
-  head->Identifier = decode_can_id( bus_id );
-  // process can frame
-  
-  return 0;
+  udp_send(upcb, UDP_TX_buf);
+
+  pbuf_free(UDP_TX_buf);
+  UDP_TX_buf = pbuf_alloc(PBUF_TRANSPORT, UDP_TX_size, PBUF_RAM);
+  *UDP_TX_level = 0;
+}
+
+// allocate dynamic memory of desired size in bytes
+static void *memAllocate(CanardInstance *const canard, const size_t amount)
+{
+  (void)canard;
+  return malloc(amount);
+}
+
+// free allocated memory
+static void memFree(CanardInstance *const canard, void *const pointer)
+{
+  (void)canard;
+  free(pointer);
 }
 /* USER CODE END 4 */
 
@@ -836,6 +1439,15 @@ void MPU_Config(void)
   MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL1;
   MPU_InitStruct.IsShareable = MPU_ACCESS_SHAREABLE;
   MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
+
+  HAL_MPU_ConfigRegion(&MPU_InitStruct);
+
+  /** Initializes and configures the Region and the memory to be protected
+  */
+  MPU_InitStruct.Number = MPU_REGION_NUMBER3;
+  MPU_InitStruct.BaseAddress = 0x24000000;
+  MPU_InitStruct.Size = MPU_REGION_SIZE_128KB;
+  MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL0;
 
   HAL_MPU_ConfigRegion(&MPU_InitStruct);
   /* Enables the MPU */

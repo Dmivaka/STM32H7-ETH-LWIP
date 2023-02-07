@@ -1,8 +1,5 @@
 #include "circ_buffer.h"
 
-extern uint8_t dummy_buffer[32];
-extern uint8_t more_dummy_buffer[32];
-
 uint8_t write_buffer(buffer_instance * s, uint8_t * local_buffer, uint16_t num_to_write)
 {       
   if( buf_size - s->bytes_written > num_to_write )
@@ -21,16 +18,6 @@ uint8_t write_buffer(buffer_instance * s, uint8_t * local_buffer, uint16_t num_t
           s->buffer_body[ start_index + i ] = local_buffer[i];
       }
 
-      /*
-      s->bytes_written += num_to_write;
-
-      local_tail += num_to_write;
-      if( local_tail > buf_size )
-      {
-          local_tail -= buf_size;
-      }
-      s->tail = local_tail;
-      */
       s->bytes_written += num_to_write;
       s->tail = update_index( s->tail, buf_size, num_to_write);
   }
@@ -64,17 +51,7 @@ uint8_t read_buffer(buffer_instance * s, uint8_t * local_buffer, uint16_t num_to
             }
             local_buffer[i] = s->buffer_body[ start_index + i ];
         }
-
-        /*
-        s->bytes_written -= num_to_read;
-
-        local_head += num_to_read;
-        if( local_head > buf_size )
-        {
-            local_head -= buf_size;
-        }
-        s->head = local_head;
-        */
+        
         s->bytes_written -= num_to_read;
         s->head = update_index( s->head, buf_size, num_to_read);
     }
@@ -84,7 +61,7 @@ uint8_t read_buffer(buffer_instance * s, uint8_t * local_buffer, uint16_t num_to
 uint16_t update_index( uint16_t index, uint16_t buffer_size, uint16_t shift)
 {
   uint16_t local_head = index + shift;
-  if( local_head > buf_size )
+  if( local_head >= buf_size )
   {
       local_head -= buf_size;
   }
