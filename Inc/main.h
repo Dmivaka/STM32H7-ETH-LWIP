@@ -53,6 +53,8 @@ extern "C" {
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
+uint64_t micros();
+
 uint8_t push_can_frame( FDCAN_HandleTypeDef *handle, uint32_t id, uint8_t length, uint8_t *payload);
 uint8_t send_frame_SPI(void);
 
