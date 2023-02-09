@@ -60,7 +60,7 @@ uint32_t LengthCoder( uint8_t length )
   }
   if( length < 32 )
   {
-    return ((uint32_t)length << 14) + 24;
+    return (uint32_t)(length + 24 ) << 14;
   }
 
   switch( length )
