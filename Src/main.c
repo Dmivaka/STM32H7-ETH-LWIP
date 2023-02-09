@@ -336,7 +336,7 @@ int main(void)
           // the canard frames filter said it is not the canard frame and returned 0.
           // we have to put this frame untouched into UDP TX chain
           uint8_t local_buffer[69] = {0};
-          uint8_t msg_len = serialize_can_frame(  1, 
+          uint8_t msg_len = serialize_can_frame(  i, 
                                                   Header.Identifier, 
                                                   LengthDecoder(Header.DataLength), 
                                                   RxData, 

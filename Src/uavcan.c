@@ -4,7 +4,6 @@
 #include "helpers.h"
 
 #include "libcanard/canard.h"
-#include "uavcan/node/Heartbeat_1_0.h"
 #include "uavcan/primitive/array/Real32_1_0.h"
 
 #include "hl_command_msg.h"
@@ -14,7 +13,6 @@ extern uint8_t LCM_tx_flag;
 extern hl_command_msg rx_lcm_msg;
 extern measurment tx_lcm_msg;
 
-uint16_t findDeviceIndex(uint16_t *array, size_t size, uint16_t target);
 void process_canard_TX_queue( uint8_t queue_num );
 
 static void *memAllocate(CanardInstance *const canard, const size_t amount);
@@ -45,7 +43,7 @@ typedef struct Bepis
 Bepis sukea[12] = 
 { 
   { 0, 0, 1000, 1001}, // 0 drive
-  { 6, 1, 1010, 1011}, // 1 drive
+  { 0, 1, 1010, 1011}, // 1 drive
   { 0, 1, 1000, 1001}, // 2 drive
   {10, 1, 1000, 1001}, // 3 drive
   { 0, 1, 1000, 1001}, // 4 drive
@@ -69,52 +67,6 @@ uint8_t sub_to_index( CanardRxSubscription* sub )
   return ( (uint32_t)sub - (uint32_t)&sukea) / ((uint32_t)sizeof(Bepis));
 }
 
-//int8_t device_to_queue[12] = {1,1,2,2,3,3,4,4,5,5,6,6};
-int8_t device_to_queue[12] = {  0, -1, -1,
-                               -1, -1, -1,
-                               -1, -1, -1,
-                               -1, -1, -1}; // only null and first driver are enabled - the can1 and can0 buses respectevely
-
-uint16_t device_node_id[12] = {  10, 11, 12,
-                                 13, 14, 15,
-                                 16, 17, 18,
-                                 19, 20, 21 };
-
-uint16_t device_tx_port[12] = {  1000, 1010, 1020,
-                                 1030, 1040, 1050,
-                                 1060, 1070, 1080,
-                                 1090, 1100, 1200 };
-
-uint16_t device_rx_port[12] = {  1001, 1011, 1021,
-                                 1031, 1041, 1051,
-                                 1061, 1071, 1081,
-                                 1091, 1101, 1201 };
-
-// these are for the INDIRECT use only, access only via Libcanard functions. 
-CanardRxSubscription Device0_Sub;
-CanardRxSubscription Device1_Sub;
-CanardRxSubscription Device2_Sub;
-CanardRxSubscription Device3_Sub;
-CanardRxSubscription Device4_Sub;
-CanardRxSubscription Device5_Sub;
-CanardRxSubscription Device6_Sub;
-CanardRxSubscription Device7_Sub;
-CanardRxSubscription Device8_Sub;
-CanardRxSubscription Device9_Sub;
-CanardRxSubscription Device10_Sub;
-CanardRxSubscription Device11_Sub;
-
-/*
-CanardRxSubscription * CanardSubscriptionMap[12] = {  &Device0_Sub, &Device1_Sub, &Device2_Sub,
-                                                      &Device3_Sub, &Device4_Sub, &Device5_Sub,
-                                                      &Device6_Sub, &Device7_Sub, &Device8_Sub,
-                                                      &Device9_Sub, &Device10_Sub, &Device11_Sub };
-*/
-
-CanardRxSubscription * CanardSubscriptionMap[12] = {  &Device0_Sub, &Device1_Sub, NULL,
-                                                      NULL, NULL, NULL,
-                                                      NULL, NULL, NULL,
-                                                      NULL, NULL, NULL };
 uint16_t response_mask = 0;
 void UAVCAN_setup(void)
 {
@@ -126,15 +78,6 @@ void UAVCAN_setup(void)
     *TxQueuesMap[i] = canardTxInit( 10, CANARD_MTU_CAN_FD); // really we need 1 element only
   }
   
-  /*
-  if( canardRxSubscribe(    &canard,
-                            CanardTransferKindMessage,
-                            sukea[3].tx_port,
-                            uavcan_primitive_array_Real32_1_0_EXTENT_BYTES_,
-                            CANARD_DEFAULT_TRANSFER_ID_TIMEOUT_USEC,
-                            &sukea[3].sub ) != 1 ){ Error_Handler(); }
-  */
-
   for( int i = 0; i < 12; i++ )
   {
     if( sukea[i].node_id != 0 )
@@ -150,31 +93,6 @@ void UAVCAN_setup(void)
     }
   }
 
-  /*
-  for( int i = 0; i < 12; i++ )
-  {
-    if( CanardSubscriptionMap[i] != NULL )
-    {
-      if( canardRxSubscribe(    &canard,
-                                CanardTransferKindMessage,
-                                device_rx_port[i],
-                                uavcan_primitive_array_Real32_1_0_EXTENT_BYTES_,
-                                CANARD_DEFAULT_TRANSFER_ID_TIMEOUT_USEC,
-                                CanardSubscriptionMap[i] ) != 1 ){ Error_Handler(); }
-    }
-  }
-  */
-  
-  /*
-  CanardRxSubscription heartbeat_msg_subscription;
-  if( canardRxSubscribe(        &canard,
-                                CanardTransferKindMessage,
-                                uavcan_node_Heartbeat_1_0_FIXED_PORT_ID_,
-                                uavcan_node_Heartbeat_1_0_EXTENT_BYTES_,
-                                CANARD_DEFAULT_TRANSFER_ID_TIMEOUT_USEC,
-                                &heartbeat_msg_subscription) != 1 ){ Error_Handler(); }  
-  */
-  
   return ;
 }
 
@@ -189,7 +107,7 @@ void UAVCAN_send(void)
   
   for( int i = 0; i < 12; i++)
   {
-    if( device_to_queue[i] >= 0 ) // check if selected drive is ebabled 
+    if( sukea[i].node_id != 0 ) // check if selected drive is ebabled 
     {
       uavcan_tx_array.value.elements[0] = rx_lcm_msg.act[i].position;
       uavcan_tx_array.value.elements[1] = rx_lcm_msg.act[i].velocity;
@@ -206,11 +124,11 @@ void UAVCAN_send(void)
       
       const CanardTransferMetadata transfer_metadata = {    .priority       = CanardPriorityHigh,
                                                             .transfer_kind  = CanardTransferKindMessage,
-                                                            .port_id        = device_tx_port[i],
+                                                            .port_id        = sukea[i].rx_port,
                                                             .remote_node_id = CANARD_NODE_ID_UNSET,
                                                             .transfer_id    = message_transfer }; 
 
-      if(canardTxPush(  TxQueuesMap[device_to_queue[i]],
+      if(canardTxPush(  TxQueuesMap[sukea[i].queue_num],
                         &canard,
                         0,
                         &transfer_metadata,
@@ -220,7 +138,7 @@ void UAVCAN_send(void)
                           Error_Handler();
                         }
       
-      process_canard_TX_queue( device_to_queue[i] );
+      process_canard_TX_queue( sukea[i].queue_num );
     }
   }
   
@@ -320,14 +238,6 @@ void process_canard_TX_queue( uint8_t queue_num )
     // After the frame is transmitted or if it has timed out while waiting, pop it from the queue and deallocate:
     canard.memory_free(&canard, canardTxPop( TxQueuesMap[queue_num], ti));
   }
-}
-
-uint16_t findDeviceIndex(uint16_t *array, size_t size, uint16_t target) 
-{
-    uint16_t i=0;
-    while((i<size) && (array[i] != target)) i++;
-
-    return (i<size) ? (i) : (-1);
 }
 
 // allocate dynamic memory of desired size in bytes
