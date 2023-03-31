@@ -26,13 +26,13 @@ lcmlite_t lcm;
 
 #define LOCAL_PORT 1555
 #define REMOTE_PORT 1556
-uint8_t RMT_IP_ADDRESS[4] = {192,168,2,105};
+uint8_t RMT_IP_ADDRESS[4] = {192,168,1,105};
 
 struct udp_pcb *upcb_1;
 
 extern FDCAN_HandleTypeDef * FDCAN_Handles_Map[3];
 
-char hl_command_charname[] = "EXAMPLE";
+char hl_command_charname[] = "DEBUG_DOWN";
 
 uint8_t LCM_rx_flag = 0;
 uint8_t LCM_tx_flag = 0;
@@ -96,7 +96,7 @@ void conke(void)
     memcpy( (uint8_t*)&lcm_tx_buf + 8 + i, &var, 4);
   }
   
-  lcmlite_publish(&lcm, "UPSTREAM", &lcm_tx_buf, sizeof(tx_lcm_msg) + 8);
+  lcmlite_publish(&lcm, "DEBUG_UP", &lcm_tx_buf, sizeof(tx_lcm_msg) + 8);
 }
 
 ip_addr_t Multicast_Addr;
@@ -108,7 +108,6 @@ void transmit_LCM_packet(const void *_buf, int buf_len, void *user)
   {
     pbuf_take(p, (void *) _buf, buf_len);
     udp_sendto(upcb_1, p, &Multicast_Addr, 1557);
-    //udp_send(upcb_1, p);
     pbuf_free(p);
   }
   else
@@ -140,7 +139,6 @@ void udp_lcm_connect(void)
   {
     upcb_1->local_port = LOCAL_PORT;
     err= udp_bind(upcb_1, IP_ADDR_ANY, 1557);
-    //err= udp_connect(upcb_1, &Multicast_Addr, 1557);
     if (err == ERR_OK)
     {
       udp_recv(upcb_1, lcm_receive_callback, NULL);
@@ -154,7 +152,7 @@ void udp_lcm_connect(void)
   sub->channel = hl_command_charname;
   sub->callback = hl_command_callback;
   sub->user = NULL;
-  lcmlite_subscribe(&lcm, sub);  
+  lcmlite_subscribe(&lcm, sub);
 }
 //-----------------------------------------------
 

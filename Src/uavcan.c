@@ -5,6 +5,7 @@
 
 #include "libcanard/canard.h"
 #include "uavcan/primitive/array/Real32_1_0.h"
+#include "uavcan/primitive/Empty_1_0.h"
 
 #include "hl_command_msg.h"
 #include "hl_state_msg.h"
@@ -30,22 +31,22 @@ CanardTxQueue 	queue5;
 
 CanardTxQueue * TxQueuesMap[6] = { &queue0, &queue1, &queue2, &queue3, &queue4, &queue5 };
 
-typedef struct Bepis
+typedef struct driver_struct
 {
   CanardNodeID node_id;
   uint8_t queue_num;
   CanardPortID rx_port; // driver listens this port
   CanardPortID tx_port; // driver writes into this port
   CanardRxSubscription sub;
-} Bepis;
+} driver_struct;
 
 // to disable device set its node_id to zero             
-Bepis sukea[12] = 
+driver_struct drivers_map[12] = 
 { 
-  { 0, 0, 1000, 1001}, // 0 drive
-  { 0, 1, 1010, 1011}, // 1 drive
-  { 0, 1, 1000, 1001}, // 2 drive
-  {10, 1, 1000, 1001}, // 3 drive
+  { 10, 0, 1100, 1101}, // 0 drive
+  { 11, 0, 1110, 1111}, // 1 drive
+  { 12, 0, 1120, 1121}, // 2 drive
+  { 0, 1, 1000, 1001}, // 3 drive
   { 0, 1, 1000, 1001}, // 4 drive
   { 0, 1, 1000, 1001}, // 5 drive
   { 0, 1, 1000, 1001}, // 6 drive
@@ -58,13 +59,13 @@ Bepis sukea[12] =
 
 CanardPortID index_to_port( uint8_t index )
 {
-  return sukea[index].rx_port;
+  return drivers_map[index].rx_port;
 }
 
-// not sure it is legal
+// not sure if it's legal
 uint8_t sub_to_index( CanardRxSubscription* sub )
 {
-  return ( (uint32_t)sub - (uint32_t)&sukea) / ((uint32_t)sizeof(Bepis));
+  return ( (uint32_t)sub - (uint32_t)&drivers_map) / ((uint32_t)sizeof(driver_struct));
 }
 
 uint16_t response_mask = 0;
@@ -80,20 +81,54 @@ void UAVCAN_setup(void)
   
   for( int i = 0; i < 12; i++ )
   {
-    if( sukea[i].node_id != 0 )
+    if( drivers_map[i].node_id != 0 )
     {
       if( canardRxSubscribe(    &canard,
                                 CanardTransferKindMessage,
-                                sukea[i].tx_port,
+                                drivers_map[i].tx_port,
                                 uavcan_primitive_array_Real32_1_0_EXTENT_BYTES_,
                                 CANARD_DEFAULT_TRANSFER_ID_TIMEOUT_USEC,
-                                &sukea[i].sub ) != 1 ){ Error_Handler(); }
+                                &drivers_map[i].sub ) != 1 ){ Error_Handler(); }
       
       response_mask |= 1UL << i; // set bit corresponding to the subscribed device
     }
   }
 
   return ;
+}
+
+uint8_t my_transfer = 0;
+void UAVCAN_request(void)
+{
+  uavcan_primitive_Empty_1_0 request;
+  
+  uint8_t c_serialized;
+  size_t c_serialized_size = uavcan_primitive_Empty_1_0_EXTENT_BYTES_;
+
+  if ( uavcan_primitive_Empty_1_0_serialize_( &request, &c_serialized, &c_serialized_size) < 0)
+  {
+    Error_Handler();
+  }
+  
+  const CanardTransferMetadata transfer_metadata = {    .priority       = CanardPriorityHigh,
+                                                        .transfer_kind  = CanardTransferKindMessage,
+                                                        .port_id        = 900,
+                                                        .remote_node_id = CANARD_NODE_ID_UNSET,
+                                                        .transfer_id    = my_transfer }; 
+
+  if(canardTxPush(  &queue0,
+                    &canard,
+                    0,
+                    &transfer_metadata,
+                    c_serialized_size,
+                    &c_serialized) < 0 )
+                    {
+                      Error_Handler();
+                    }
+  
+  process_canard_TX_queue( 0 );
+  
+  my_transfer++ ;
 }
 
 uint16_t response_recorder = 0;
@@ -107,13 +142,13 @@ void UAVCAN_send(void)
   
   for( int i = 0; i < 12; i++)
   {
-    if( sukea[i].node_id != 0 ) // check if selected drive is ebabled 
+    if( drivers_map[i].node_id != 0 ) // check if selected drive is ebabled 
     {
       uavcan_tx_array.value.elements[0] = rx_lcm_msg.act[i].position;
-      uavcan_tx_array.value.elements[1] = rx_lcm_msg.act[i].velocity;
-      uavcan_tx_array.value.elements[2] = rx_lcm_msg.act[i].torque;
-      uavcan_tx_array.value.elements[3] = rx_lcm_msg.act[i].kp;
-      uavcan_tx_array.value.elements[4] = rx_lcm_msg.act[i].kd;
+      uavcan_tx_array.value.elements[1] = rx_lcm_msg.act[i].kp;
+      uavcan_tx_array.value.elements[2] = rx_lcm_msg.act[i].velocity;
+      uavcan_tx_array.value.elements[3] = rx_lcm_msg.act[i].kd;
+      uavcan_tx_array.value.elements[4] = rx_lcm_msg.act[i].torque; 
       
       size_t c_serialized_size = uavcan_primitive_array_Real32_1_0_EXTENT_BYTES_;
 
@@ -124,11 +159,11 @@ void UAVCAN_send(void)
       
       const CanardTransferMetadata transfer_metadata = {    .priority       = CanardPriorityHigh,
                                                             .transfer_kind  = CanardTransferKindMessage,
-                                                            .port_id        = sukea[i].rx_port,
+                                                            .port_id        = drivers_map[i].rx_port,
                                                             .remote_node_id = CANARD_NODE_ID_UNSET,
                                                             .transfer_id    = message_transfer }; 
 
-      if(canardTxPush(  TxQueuesMap[sukea[i].queue_num],
+      if(canardTxPush(  TxQueuesMap[drivers_map[i].queue_num],
                         &canard,
                         0,
                         &transfer_metadata,
@@ -138,7 +173,7 @@ void UAVCAN_send(void)
                           Error_Handler();
                         }
       
-      process_canard_TX_queue( sukea[i].queue_num );
+      process_canard_TX_queue( drivers_map[i].queue_num );
     }
   }
   
@@ -169,7 +204,7 @@ uint8_t parse_canard_frame( uint32_t id, size_t size, void* payload)
     {
       uint16_t index = sub_to_index( out_subscription );
       
-      if( sukea[index].tx_port == transfer.metadata.port_id )
+      if( drivers_map[index].tx_port == transfer.metadata.port_id )
       {
         uavcan_primitive_array_Real32_1_0 array;
         size_t array_ser_buf_size = uavcan_primitive_array_Real32_1_0_EXTENT_BYTES_;
