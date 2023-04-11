@@ -253,7 +253,7 @@ void distribute_vb_frame( uint8_t * vb_frame )
 
     __set_PRIMASK(primask_bit);               // Restore PRIMASK bit
     
-    if( !LL_SPI_IsActiveMasterTransfer(SPI1) )
+    if( !LL_SPI_IsActiveMasterTransfer(SPI4) )
     {
       send_frame_SPI();
     }
