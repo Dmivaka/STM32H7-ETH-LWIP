@@ -291,7 +291,7 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   uint32_t timestamp = HAL_GetTick();
-  uint32_t uavcan_request_timestamp = HAL_GetTick();
+  uint64_t uavcan_request_timestamp = micros();
   while (1)
   {
     /* USER CODE END WHILE */
@@ -312,12 +312,12 @@ int main(void)
     }
     
     MX_LWIP_Process();
-    
-    if( HAL_GetTick() > uavcan_request_timestamp )
+
+    if( micros() > uavcan_request_timestamp )
     {
       UAVCAN_request();
       
-      uavcan_request_timestamp += 10;
+      uavcan_request_timestamp += 1000;
     }    
     
     if( LCM_rx_flag )
@@ -1073,7 +1073,6 @@ uint8_t push_can_frame( FDCAN_HandleTypeDef *handle, uint32_t id, uint8_t length
     {
       Error_Handler();
     }
-    HAL_Delay(2);
   }
   else
   {

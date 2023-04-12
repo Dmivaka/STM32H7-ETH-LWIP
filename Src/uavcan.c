@@ -43,18 +43,18 @@ typedef struct driver_struct
 // to disable device set its node_id to zero             
 driver_struct drivers_map[12] = 
 { 
-  { 10, 0, 1100, 1101}, // 0 drive
-  { 11, 0, 1110, 1111}, // 1 drive
-  { 12, 0, 1120, 1121}, // 2 drive
+  { 0, 0, 1100, 1101}, // 0 drive
+  { 0, 0, 1110, 1111}, // 1 drive
+  { 0, 0, 1120, 1121}, // 2 drive
   { 0, 1, 1000, 1001}, // 3 drive
   { 0, 1, 1000, 1001}, // 4 drive
   { 0, 1, 1000, 1001}, // 5 drive
-  { 0, 1, 1000, 1001}, // 6 drive
-  { 0, 1, 1030, 1031}, // 7 drive
-  { 0, 1, 1000, 1001}, // 8 drive
-  { 0, 1, 1000, 1001}, // 9 drive
-  { 0, 1, 1000, 1001}, // 10 drive
-  { 0, 1, 1000, 1001}, // 11 drive
+  { 30, 0, 1300, 1301}, // 6 drive
+  { 31, 0, 1310, 1311}, // 7 drive
+  { 32, 0, 1320, 1321}, // 8 drive
+  { 40, 3, 1400, 1401}, // 9 drive
+  { 41, 3, 1410, 1411}, // 10 drive
+  { 42, 3, 1420, 1421}, // 11 drive
  };
 
 CanardPortID index_to_port( uint8_t index )
@@ -72,13 +72,8 @@ uint16_t response_mask = 0;
 void UAVCAN_setup(void)
 {
   canard = canardInit(&memAllocate, &memFree);	// Initialization of a canard instance
-  canard.node_id = 40;
-  
-  for( int i = 0; i < 6; i++ )
-  {
-    *TxQueuesMap[i] = canardTxInit( 10, CANARD_MTU_CAN_FD); // really we need 1 element only
-  }
-  
+  canard.node_id = 100;
+
   for( int i = 0; i < 12; i++ )
   {
     if( drivers_map[i].node_id != 0 )
@@ -91,6 +86,8 @@ void UAVCAN_setup(void)
                                 &drivers_map[i].sub ) != 1 ){ Error_Handler(); }
       
       response_mask |= 1UL << i; // set bit corresponding to the subscribed device
+      
+      *TxQueuesMap[ drivers_map[i].queue_num ] = canardTxInit( 10, CANARD_MTU_CAN_FD); // really we need 1 element only
     }
   }
 
@@ -115,19 +112,23 @@ void UAVCAN_request(void)
                                                         .port_id        = 900,
                                                         .remote_node_id = CANARD_NODE_ID_UNSET,
                                                         .transfer_id    = my_transfer }; 
+  for( int i = 0; i < 6; i++ )
+  {
+    if( TxQueuesMap[i]->mtu_bytes == CANARD_MTU_CAN_FD )
+    {
+      if(canardTxPush(  TxQueuesMap[i],
+                        &canard,
+                        0,
+                        &transfer_metadata,
+                        c_serialized_size,
+                        &c_serialized) < 0 )
+                        {
+                          Error_Handler();
+                        }
+      process_canard_TX_queue( i );
+    }
+  }
 
-  if(canardTxPush(  &queue0,
-                    &canard,
-                    0,
-                    &transfer_metadata,
-                    c_serialized_size,
-                    &c_serialized) < 0 )
-                    {
-                      Error_Handler();
-                    }
-  
-  process_canard_TX_queue( 0 );
-  
   my_transfer++ ;
 }
 
