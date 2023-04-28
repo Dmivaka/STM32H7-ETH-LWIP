@@ -43,18 +43,18 @@ typedef struct driver_struct
 // to disable device set its node_id to zero             
 driver_struct drivers_map[12] = 
 { 
-  { 0, 0, 1100, 1101}, // 0 drive
-  { 0, 0, 1110, 1111}, // 1 drive
-  { 0, 0, 1120, 1121}, // 2 drive
-  { 0, 1, 1000, 1001}, // 3 drive
-  { 0, 1, 1000, 1001}, // 4 drive
-  { 0, 1, 1000, 1001}, // 5 drive
-  { 30, 0, 1300, 1301}, // 6 drive
-  { 31, 0, 1310, 1311}, // 7 drive
-  { 32, 0, 1320, 1321}, // 8 drive
-  { 40, 3, 1400, 1401}, // 9 drive
-  { 41, 3, 1410, 1411}, // 10 drive
-  { 42, 3, 1420, 1421}, // 11 drive
+  { 10, 0, 1100, 1101}, // 0 drive
+  { 11, 0, 1110, 1111}, // 1 drive
+  { 12, 0, 1120, 1121}, // 2 drive
+  { 20, 1, 1200, 1201}, // 3 drive
+  { 21, 1, 1210, 1211}, // 4 drive
+  { 22, 1, 1220, 1221}, // 5 drive
+  { 30, 3, 1300, 1301}, // 6 drive
+  { 31, 3, 1310, 1311}, // 7 drive
+  { 32, 3, 1320, 1321}, // 8 drive
+  { 40, 4, 1400, 1401}, // 9 drive
+  { 41, 4, 1410, 1411}, // 10 drive
+  { 42, 4, 1420, 1421}, // 11 drive
  };
 
 CanardPortID index_to_port( uint8_t index )
