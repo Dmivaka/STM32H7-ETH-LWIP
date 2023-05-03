@@ -36,7 +36,7 @@
 #include "uavcan.h"
 
 #include "hl_command_msg.h"
-#include "hl_state_msg.h"
+#include "msgs_hl_state.h"
 
 #include "circular_heap.h"
 /* USER CODE END Includes */
@@ -139,7 +139,7 @@ struct pbuf *UDP_TX_buf = NULL;
 
 //#define uavcan_en
 
-uint8_t MY_IP_ADDRESS[4] = {192, 168, 1, 254};
+uint8_t MY_IP_ADDRESS[4] = {10, 127, 0, 2};
 /* USER CODE END 0 */
 
 /**
@@ -1042,7 +1042,7 @@ void HAL_FDCAN_TxFifoEmptyCallback(FDCAN_HandleTypeDef *hfdcan)
       
         circular_heap_free( can_tx_heaps[bus_num], dequeue( can_tx_queues[bus_num] ));
         
-        __set_PRIMASK(primask_bit);                   // Restore PRIMASK bit
+      __set_PRIMASK(primask_bit);                   // Restore PRIMASK bit
     }
     else
     {

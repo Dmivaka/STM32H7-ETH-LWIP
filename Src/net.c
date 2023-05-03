@@ -16,7 +16,7 @@
 #include "lcmlite.h"
 
 #include "hl_command_msg.h"
-#include "hl_state_msg.h"
+#include "msgs_hl_state.h"
 
 #include "circular_heap.h"
 //-----------------------------------------------
@@ -26,13 +26,13 @@ lcmlite_t lcm;
 
 #define LOCAL_PORT 1555
 #define REMOTE_PORT 1556
-uint8_t RMT_IP_ADDRESS[4] = {192,168,1,105};
+uint8_t RMT_IP_ADDRESS[4] = {10,127,0,1};
 
 struct udp_pcb *upcb_1;
 
 extern FDCAN_HandleTypeDef * FDCAN_Handles_Map[3];
 
-char hl_command_charname[] = "DEBUG_DOWN";
+char hl_command_charname[] = "HL_COMMAND";
 
 uint8_t LCM_rx_flag = 0;
 uint8_t LCM_tx_flag = 0;
@@ -72,9 +72,9 @@ static void hl_command_callback(lcmlite_t *lcm, const char *channel, const void 
   return ;
 }
 
-measurment tx_lcm_msg = {0};
+msgs_hl_state tx_lcm_msg = {0};
 uint8_t lcm_tx_buf[512] = {0};
-uint64_t measurment_hash = 0x5f3bf46b0e2209da;
+uint64_t measurment_hash = 0xabf4690030f15148;
 
 void conke(void)
 {
@@ -96,7 +96,7 @@ void conke(void)
     memcpy( (uint8_t*)&lcm_tx_buf + 8 + i, &var, 4);
   }
   
-  lcmlite_publish(&lcm, "DEBUG_UP", &lcm_tx_buf, sizeof(tx_lcm_msg) + 8);
+  lcmlite_publish(&lcm, "HL_STATE", &lcm_tx_buf, sizeof(tx_lcm_msg) + 8);
 }
 
 ip_addr_t Multicast_Addr;
