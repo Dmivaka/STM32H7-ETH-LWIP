@@ -85,6 +85,10 @@ buffer_instance SPI_RX_buf = {0, NULL, 0, SPI_RX_body};
 
 extern uint8_t LCM_rx_flag;
 extern uint8_t LCM_tx_flag;
+
+uint8_t indicators_state[3] = { 0 };
+uint16_t indicators_pins[3] = { CAN1_ind_Pin, CAN2_ind_Pin, CAN3_ind_Pin };
+GPIO_TypeDef *indicators_ports[3] = { CAN1_ind_GPIO_Port, CAN2_ind_GPIO_Port, CAN3_ind_GPIO_Port };
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -342,6 +346,9 @@ int main(void)
         uint8_t RxData[64];
     
         if (HAL_FDCAN_GetRxMessage(FDCAN_Handles_Map[i], FDCAN_RX_FIFO0, &Header, RxData) != HAL_OK){ Error_Handler(); }
+        
+        // turn LED to indicate received message
+        indicators_state[i] = 1;
 
         // separate frames into the LCM and UAVCAN -related buffers
         if( !parse_canard_frame( Header.Identifier, LengthDecoder(Header.DataLength), RxData ) )
@@ -1006,6 +1013,22 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     //HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_6);
     //TIM1_Callback();
   }
+  if( htim->Instance == TIM7 )
+  {
+    for( int i = 0; i < 3; i++ )
+    {
+      if( indicators_state[i] )
+      {
+        // enable LED
+        LL_GPIO_SetOutputPin(indicators_ports[i], indicators_pins[i]);
+        indicators_state[i] = 0;
+      }
+      else
+      {
+        LL_GPIO_ResetOutputPin(indicators_ports[i], indicators_pins[i]);
+      }
+    }
+  }  
 }
 
 // https://stackoverflow.com/a/25004214
