@@ -7,12 +7,12 @@
 #include "uavcan/primitive/array/Real32_1_0.h"
 #include "uavcan/primitive/Empty_1_0.h"
 
-#include "hl_command_msg.h"
-#include "msgs_hl_state.h"
+#include "servo_state_msg.h"
+#include "servo_cmd_msg.h"
 
 extern uint8_t LCM_tx_flag;
-extern hl_command_msg rx_lcm_msg;
-extern msgs_hl_state tx_lcm_msg;
+extern servo_cmd_msg rx_lcm_msg;
+extern servo_state_msg tx_lcm_msg;
 
 void process_canard_TX_queue( uint8_t queue_num );
 
@@ -145,11 +145,11 @@ void UAVCAN_send(void)
   {
     if( drivers_map[i].node_id != 0 ) // check if selected drive is ebabled 
     {
-      uavcan_tx_array.value.elements[0] = rx_lcm_msg.act[i].position;
-      uavcan_tx_array.value.elements[1] = rx_lcm_msg.act[i].kp;
-      uavcan_tx_array.value.elements[2] = rx_lcm_msg.act[i].velocity;
-      uavcan_tx_array.value.elements[3] = rx_lcm_msg.act[i].kd;
-      uavcan_tx_array.value.elements[4] = rx_lcm_msg.act[i].torque; 
+      uavcan_tx_array.value.elements[0] = rx_lcm_msg.position[i];
+      uavcan_tx_array.value.elements[1] = rx_lcm_msg.kp[i];
+      uavcan_tx_array.value.elements[2] = rx_lcm_msg.velocity[i];
+      uavcan_tx_array.value.elements[3] = rx_lcm_msg.kd[i];
+      uavcan_tx_array.value.elements[4] = rx_lcm_msg.torque[i]; 
       
       size_t c_serialized_size = uavcan_primitive_array_Real32_1_0_EXTENT_BYTES_;
 
@@ -215,9 +215,9 @@ uint8_t parse_canard_frame( uint32_t id, size_t size, void* payload)
           Error_Handler();
         }
 
-        tx_lcm_msg.joint_pos[index]= array.value.elements[0];
-        tx_lcm_msg.joint_vel[index]= array.value.elements[1];
-        tx_lcm_msg.joint_torq[index]= array.value.elements[2];
+        tx_lcm_msg.position[index]= array.value.elements[0];
+        tx_lcm_msg.velocity[index]= array.value.elements[1];
+        tx_lcm_msg.torque[index]= array.value.elements[2];
         
         response_recorder |= 1UL << index; // set bit corresponding to the device answered
 
