@@ -138,6 +138,9 @@ queue can3_tx_queue = {NULL, NULL};
 queue *can_tx_queues[3] = { &can1_tx_queue, &can2_tx_queue, &can3_tx_queue };
 circular_heap_t *can_tx_heaps[3] = { &can1_tx_heap, &can2_tx_heap, &can3_tx_heap };
 
+FDCAN_ErrorCountersTypeDef can_error_count[3] = {0};
+FDCAN_ProtocolStatusTypeDef can_protocol_stat[3] = {0};
+
 struct pbuf *UDP_TX_buf = NULL;
 #define UDP_TX_size 128
 
@@ -215,11 +218,6 @@ int main(void)
   HAL_TIM_Base_Start_IT(&htim7); // enable microseconds timesource
   HAL_TIM_Base_Start_IT(&htim1);
   
-  if (HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_TX_FIFO_EMPTY, FDCAN_TX_BUFFER0 | FDCAN_TX_BUFFER1 | FDCAN_TX_BUFFER2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  
   // Filter for messages from master to this dedicated device. 
   FDCAN_FilterTypeDef sFilterConfig;  
   sFilterConfig.IdType = FDCAN_EXTENDED_ID;
@@ -261,31 +259,6 @@ int main(void)
     }
   }
   ///////////////////////////////////////////////////////////////////////////
-  
-  FDCAN_TxHeaderTypeDef TxHeader;
-  uint8_t data[8] = {'a','b','c','d','e','f','g','h'};
-  
-  if (HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1) != 0)
-  {
-    // Add message to Tx FIFO 
-    TxHeader.Identifier = 0x1;
-    TxHeader.IdType = FDCAN_EXTENDED_ID;
-    TxHeader.TxFrameType = FDCAN_DATA_FRAME;
-    TxHeader.DataLength = FDCAN_DLC_BYTES_8;
-    TxHeader.ErrorStateIndicator = FDCAN_ESI_PASSIVE;
-    TxHeader.BitRateSwitch = FDCAN_BRS_ON;
-    TxHeader.FDFormat = FDCAN_FD_CAN;
-    TxHeader.TxEventFifoControl = FDCAN_STORE_TX_EVENTS;
-    TxHeader.MessageMarker = 0x00;
-    if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, data) != HAL_OK)
-    {
-      Error_Handler();
-    }
-  }
-  else
-  {
-
-  }
 
   // enable the companion chip
   LL_GPIO_SetOutputPin(GPIOE, LL_GPIO_PIN_5);
@@ -340,6 +313,15 @@ int main(void)
     /// retrieve and process frames from the on-chip FDCAN peripherals
     for( int i = 0; i < 3; i++)
     {
+      HAL_FDCAN_GetErrorCounters(FDCAN_Handles_Map[i], &can_error_count[i]);
+      HAL_FDCAN_GetProtocolStatus(FDCAN_Handles_Map[i], &can_protocol_stat[i]);
+      
+      // ? https://community.st.com/t5/stm32-mcu-products/stm32h7-fdcan-has-lost-the-automatic-bus-off-recovery-mechanism/td-p/187400
+      if( can_protocol_stat[i].BusOff )
+      {
+        CLEAR_BIT(FDCAN_Handles_Map[i]->Instance->CCCR, FDCAN_CCCR_INIT);
+      }
+
       while( HAL_FDCAN_GetRxFifoFillLevel(FDCAN_Handles_Map[i], FDCAN_RX_FIFO0) > 0 )
       {
         FDCAN_RxHeaderTypeDef Header;
@@ -585,13 +567,6 @@ static void MX_FDCAN1_Init(void)
   {
     Error_Handler();
   }
-  
-  // Activate Rx FIFO 0 new message notification
-  if( HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK )
-  {
-    Error_Handler();
-  }
-  
   /* USER CODE END FDCAN1_Init 2 */
 
 }
@@ -654,12 +629,6 @@ static void MX_FDCAN2_Init(void)
   {
     Error_Handler();
   }
-  
-  if( HAL_FDCAN_ActivateNotification(&hfdcan2, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK )
-  {
-    Error_Handler();
-  }
-  
   /* USER CODE END FDCAN2_Init 2 */
 
 }
@@ -722,12 +691,6 @@ static void MX_FDCAN3_Init(void)
   {
     Error_Handler();
   }
-
-  if( HAL_FDCAN_ActivateNotification(&hfdcan3, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK )
-  {
-    Error_Handler();
-  }
-  
   /* USER CODE END FDCAN3_Init 2 */
 
 }
