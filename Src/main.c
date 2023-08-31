@@ -35,9 +35,6 @@
 
 #include "uavcan.h"
 
-#include "hl_command_msg.h"
-#include "msgs_hl_state.h"
-
 #include "circular_heap.h"
 /* USER CODE END Includes */
 
@@ -276,10 +273,6 @@ int main(void)
     /* USER CODE BEGIN 3 */
     if( HAL_GetTick() > timestamp )
     {
-      //LL_GPIO_SetOutputPin(GPIOE, LL_GPIO_PIN_4);
-      //HAL_SPI_Transmit_DMA(&hspi4, SPI_TX_buf, 512);
-      
-      //conke(); // debug transmition of sample data
       timestamp += 100;
       
       if( UDP_TX_level > 0 )
@@ -306,7 +299,8 @@ int main(void)
     
     if( LCM_tx_flag )
     {
-      conke();
+      transmit_servo_state();
+      
       LCM_tx_flag = 0;
     }
 
@@ -1080,7 +1074,7 @@ uint8_t push_can_frame( FDCAN_HandleTypeDef *handle, uint32_t id, uint8_t length
   return 0;
 }
 
-volatile uint16_t zhazha = 0;
+volatile uint32_t SPI_sent_nbr = 0;
 
 void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
 {
@@ -1088,7 +1082,7 @@ void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
   {
     circular_heap_free( &spi_tx_heap, dequeue( &spi_tx_queue ));
     send_frame_SPI();
-    zhazha++;
+    SPI_sent_nbr++;
   }
 }
 
@@ -1097,21 +1091,18 @@ uint8_t send_frame_SPI(void)
 {
   if( !LL_SPI_IsActiveMasterTransfer(SPI1) )
   {
-    char *payload = get_queue_head( &spi_tx_queue );
-    if( payload != NULL )
+    char * vb_frame = get_queue_head( &spi_tx_queue );
+    if( vb_frame != NULL )
     {
       // bind payload to SPI DMA transfer
-      uint8_t data_len = payload[0];
-      
-      //if( data_len != 13 ){     Error_Handler();        }
-      
+      uint8_t data_len = vb_frame[0];
+
       LL_GPIO_SetOutputPin(GPIOE, LL_GPIO_PIN_4);
-      HAL_SPI_Transmit_DMA(&hspi4, payload, data_len);      
+      HAL_SPI_Transmit_DMA(&hspi4, vb_frame, data_len);      
     }
     else
     {
       // buffer's empty!
-      //while(1);
     }
   }
   

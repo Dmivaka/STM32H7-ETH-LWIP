@@ -38,7 +38,13 @@ uint8_t LCM_rx_flag = 0;
 uint8_t LCM_tx_flag = 0;
 
 //-----------------------------------------------
-static inline float ReverseFloat( const float inFloat );
+static inline uint32_t word_reverse(uint32_t i)
+{
+  uint32_t res = 0;
+  __asm("REV %[result], %[input_i]": [result] "=r" (res): [input_i] "r" (i));
+  return res;
+}
+
 void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port);
 
 servo_cmd_msg rx_lcm_msg = {0};
@@ -49,8 +55,7 @@ static void hl_command_callback(lcmlite_t *lcm, const char *channel, const void 
 {
   // the first 64 bits of provided buffer contain hash number,
   // which is unique for the message type (see LCM generated headers)
-  uint64_t buf_msg_hash = 0;
-  memcpy( &buf_msg_hash, (uint8_t*)buf, 8);
+  uint64_t buf_msg_hash = *(uint64_t*)buf;
   
   if( buf_msg_hash != servo_cmd_hash )
   {
@@ -59,12 +64,10 @@ static void hl_command_callback(lcmlite_t *lcm, const char *channel, const void 
   
   // copy the data from the provided buffer into the global LCM ctucture
   // reverse data from the big-endian into small-endian simultaneously
-  for( int i = 0; i < sizeof(rx_lcm_msg); i += 4)
+  for( int i = 0; i < sizeof(rx_lcm_msg)/4; i++)
   {
-    float var;
-    memcpy( &var, (uint8_t*)buf + 8 + i, 4);
-    var = ReverseFloat(var);
-    memcpy( (uint8_t*)&rx_lcm_msg + i, &var, 4);
+    uint32_t var = *((uint32_t*)buf + 2 + i); // read word from the input buffer
+    *((uint32_t*)&rx_lcm_msg + i) = word_reverse(var); // write reversed word into the output buffer
   }
   
   LCM_rx_flag = 1;
@@ -76,24 +79,22 @@ servo_state_msg tx_lcm_msg = {0};
 uint8_t lcm_tx_buf[512] = {0};
 uint64_t servo_state_hash = 0xf006a2fd1ea7342f;
 
-void conke(void)
+void transmit_servo_state(void)
 {
   /*
   for( int i = 0; i < 12; i++ )
   {
-    tx_lcm_msg.act[i].position = i*1.0f + 0.1f;
-    tx_lcm_msg.act[i].velocity = i*1.0f + 0.2f;
-    tx_lcm_msg.act[i].torque = i*1.0f + 0.3f;
+    tx_lcm_msg.position[i] = i;
+    tx_lcm_msg.velocity[i] = i;
+    tx_lcm_msg.torque[i] = i;
   }
   */
   memcpy( &lcm_tx_buf, &servo_state_hash, 8);
 
-  for( int i = 0; i < sizeof(tx_lcm_msg); i += 4)
+  for( int i = 0; i < sizeof(tx_lcm_msg)/4; i++)
   {
-    float var;
-    memcpy( &var, (uint8_t*)&tx_lcm_msg + i, 4);
-    var = ReverseFloat(var);
-    memcpy( (uint8_t*)&lcm_tx_buf + 8 + i, &var, 4);
+    uint32_t var = *((uint32_t*)&tx_lcm_msg + (int)i); // read word from the input buffer
+    *((uint32_t*)&lcm_tx_buf + 2 + i) = word_reverse(var); // write reversed word into the output buffer
   }
   
   lcmlite_publish(&lcm, "SERVO_STATE", &lcm_tx_buf, sizeof(tx_lcm_msg) + 8);
@@ -283,24 +284,4 @@ void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const
   }
   
   pbuf_free(p);
-}
-//-----------------------------------------------
-void TIM1_Callback(void)
-{
-  //udp_client_send();
-}
-//--------------------------------------------------
-static inline float ReverseFloat( const float inFloat )
-{
-   float retVal;
-   char *floatToConvert = ( char* ) & inFloat;
-   char *returnFloat = ( char* ) & retVal;
-
-   // swap the bytes into a temporary buffer
-   returnFloat[0] = floatToConvert[3];
-   returnFloat[1] = floatToConvert[2];
-   returnFloat[2] = floatToConvert[1];
-   returnFloat[3] = floatToConvert[0];
-
-   return retVal;
 }
