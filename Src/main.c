@@ -1089,7 +1089,7 @@ void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
 // push VB CAN frame into CAN FIFO
 uint8_t send_frame_SPI(void)
 {
-  if( !LL_SPI_IsActiveMasterTransfer(SPI1) )
+  if( !LL_SPI_IsActiveMasterTransfer(SPI4) )
   {
     char * vb_frame = get_queue_head( &spi_tx_queue );
     if( vb_frame != NULL )

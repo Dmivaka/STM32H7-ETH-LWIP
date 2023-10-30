@@ -138,9 +138,9 @@ void enqueue( queue *q, item *n )
   }
   else
   {
-    q->tail->nexta = n;
-    q->tail = n;
-    q->tail->nexta = NULL;
+    q->tail->nexta = n; // link new element to the current tail element
+    q->tail = n; // move the tail to the new element
+    q->tail->nexta = NULL; // new tail has not following element yet
   }
 }
 
