@@ -1,7 +1,9 @@
-.DS_Store
-*.dep
-settings
-/EWARM/ETH-723VE/List
-/EWARM/ETH-723VE/Obj
-/EWARM/ETH-723VE/Exe
-version.h
+!EWARM/
+EWARM/*
+!EWARM/*.ewp
+!EWARM/*.eww
+!EWARM/*.s
+
+LwIP/
+
+Drivers/
