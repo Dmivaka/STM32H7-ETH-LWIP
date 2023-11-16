@@ -89,7 +89,7 @@ void transmit_servo_state(void)
     tx_lcm_msg.torque[i] = i;
   }
   */
-  memcpy( &lcm_tx_buf, &servo_state_hash, 8);
+  *(uint64_t*)lcm_tx_buf = servo_state_hash;  // write 8-byte long servo_state_hash into the 0-7 bytes of array
 
   for( int i = 0; i < sizeof(tx_lcm_msg)/4; i++)
   {

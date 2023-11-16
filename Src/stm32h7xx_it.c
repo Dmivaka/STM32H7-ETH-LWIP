@@ -24,8 +24,6 @@
 /* USER CODE BEGIN Includes */
 #include "stm32h7xx_ll_spi.h"
 #include "stm32h7xx_ll_gpio.h"
-
-#include "circ_buffer.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -47,14 +45,10 @@
 /* USER CODE BEGIN PV */
 uint64_t TIM7_ITs = 0;
 
-int16_t new_packet_start_index = 0;
-
 volatile uint32_t GPIO_counter = 0;
 
-uint16_t saved_dma_level = buf_size;
-volatile uint32_t EXTI_counter = 0;
-
-extern buffer_instance SPI_RX_buf;
+extern uint32_t SPI_RX_TAIL;
+extern uint32_t SPI_RX_LAST_TAIL;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -322,68 +316,27 @@ void TIM1_UP_IRQHandler(void)
 void EXTI15_10_IRQHandler(void)
 {
   /* USER CODE BEGIN EXTI15_10_IRQn 0 */
-  
   if( __HAL_GPIO_EXTI_GET_IT(GPIO_PIN_15) )
   {
-    EXTI_counter++;
+    uint32_t current_mem_counter = 1024 - __HAL_DMA_GET_COUNTER(&hdma_spi3_rx);
     
-    // get the current DMA buffer counter
-    
-    int16_t current_dma_level =  __HAL_DMA_GET_COUNTER(&hdma_spi3_rx);
-    
-    int16_t packet_length = saved_dma_level - current_dma_level;
-    
-    if( packet_length < 0 )
+    if( current_mem_counter > 950 ) // are we reaching the end of the buffer?
     {
-      packet_length += buf_size;
-    }
-    
-    SPI_RX_buf.tail = current_dma_level;
-    SPI_RX_buf.bytes_written += packet_length;
-    
-    saved_dma_level = current_dma_level;
-  }
-  
-  /*
-  // is it signal from the master MCU?
-  if( __HAL_GPIO_EXTI_GET_IT(GPIO_PIN_0) )
-  {
-    for( int i = 0; i < 5; i++ ); // stupid delay couse without it DMA returns wrong counter value
-    
-    // get the current DMA buffer counter
-    uint16_t local_buf_head = buf_size - __HAL_DMA_GET_COUNTER(&hdma_spi3_rx);
-    
-    // is it rising or falling edge EXTI?
-    if( LL_GPIO_IsInputPinSet(GPIOD, GPIO_PIN_0) ) // rising edge
-    {
-      // start of the SPI packet reception
-      // need to save current buffer's head position to calculate how much data 
-      // there's in the packet
-      new_packet_start_index = local_buf_head;
-    }
-    else // falling edge
-    {
-      // end of the SPI packet reception
-      // need to calculate amount of data received
-      int16_t packet_length = local_buf_head - new_packet_start_index;
+      __HAL_DMA_DISABLE(&hdma_spi3_rx);
       
-      // did a buffer make a full turn?
-      if( packet_length < 0 )
-      {
-        packet_length += buf_size;
-      }
+      __HAL_DMA_SET_COUNTER(&hdma_spi3_rx, 1024);
+
+      __HAL_DMA_ENABLE(&hdma_spi3_rx);
       
-      // update the information on coupled buffer 
-      //gaga.tail = local_buf_head;
-      //gaga.bytes_written += packet_length;
-      //cool_flag = 1;
+      HAL_SPI_DMAResume(&hspi3);
+      
+      SPI_RX_LAST_TAIL = current_mem_counter;
+    }
+    else
+    {
+      SPI_RX_TAIL = current_mem_counter;
     }
   }
-  else
-  {
-    //the fuck?!
-  }
-  */
   /* USER CODE END EXTI15_10_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_15);
   /* USER CODE BEGIN EXTI15_10_IRQn 1 */

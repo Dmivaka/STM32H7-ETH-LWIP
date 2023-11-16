@@ -23,7 +23,6 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "net.h"
-#include "circ_buffer.h"
 #include "helpers.h"
 #include <string.h>
 
@@ -78,7 +77,9 @@ uint8_t SPI_TX_buf[16384] = {0};
 #pragma location=0x30007C00
 uint8_t SPI_RX_body[1024] = {0};
 
-buffer_instance SPI_RX_buf = {0, NULL, 0, SPI_RX_body};
+uint32_t SPI_RX_HEAD = 0;
+uint32_t SPI_RX_TAIL = 0;
+uint32_t SPI_RX_LAST_TAIL = 0;
 
 extern uint8_t LCM_rx_flag;
 extern uint8_t LCM_tx_flag;
@@ -348,25 +349,21 @@ int main(void)
       }
     }
     
-    /// processing of the serialized FDCAN frames from companion chip (SPI RX chain)
-    while( SPI_RX_buf.bytes_written > 0 )
+    // process SPI RX buffer
+    while( SPI_RX_HEAD != SPI_RX_TAIL )
     {
-      uint8_t local_buffer[69] = {0};
-      uint8_t msg_len = 0;
+      uint8_t *local_buffer = &SPI_RX_body[SPI_RX_HEAD];
+      uint8_t full_frame_length = local_buffer[0]; // the length of the frame is stored in it's head
       
-      uint32_t primask_bit = __get_PRIMASK();  // backup PRIMASK bit
-      __disable_irq();                  // Disable all interrupts by setting PRIMASK bit on Cortex
+      SPI_RX_HEAD += full_frame_length;
       
-        msg_len = SPI_RX_buf.buffer_body[SPI_RX_buf.head]; // get the frame length, it's located at the beginning of new frame in the buffer
-        if( msg_len > SPI_RX_buf.bytes_written )
-        {
-          // buffer is corrupted
-          Error_Handler();
-        }
-        read_buffer(&SPI_RX_buf, local_buffer, msg_len);
+      if( SPI_RX_HEAD == SPI_RX_LAST_TAIL )
+      {
+        SPI_RX_HEAD = 0;
         
-      __set_PRIMASK(primask_bit);     // Restore PRIMASK bit
-
+        SPI_RX_LAST_TAIL = 1024;
+      }
+      
       uint32_t identifier;
       size_t size;
       uint8_t RxData[69];
@@ -377,35 +374,14 @@ int main(void)
       {
         // the canard frames filter said it is not the canard frame and returned 0.
         // we have to put this frame untouched into UDP TX chain
-        if( UDP_TX_level + msg_len > UDP_TX_size )
+        if( UDP_TX_level + full_frame_length > UDP_TX_size )
         {
           UDP_TX_send( &UDP_TX_level );
         }
 
-        pbuf_take_at( UDP_TX_buf, local_buffer, msg_len, UDP_TX_level);
-        UDP_TX_level += msg_len;
+        pbuf_take_at( UDP_TX_buf, local_buffer, full_frame_length, UDP_TX_level);
+        UDP_TX_level += full_frame_length;
       }
-
-      /// the rest is debug errors check
-/*
-      if( msg_len != 13 )
-      {
-        Error_Handler();
-      }
-
-      if( previos_char == local_buffer[10] )
-      {
-        Error_Handler();
-      }
-      previos_char = local_buffer[10];
-      
-      debug_collector[debug_index] = previos_char;
-      debug_index++;
-      if( debug_index > 1023 )
-      {
-        debug_index = 0;
-      }
-*/
     }
   }
   /* USER CODE END 3 */
@@ -951,7 +927,7 @@ uint8_t serialize_can_frame( uint8_t bus, uint32_t id, size_t size, uint8_t* src
   dst[0] = size + 5; // the first byte holds the full length of serialized frame
 
   uint32_t bus_id = encode_bus_id( bus, id );
-  memcpy( &dst[1], &bus_id, 4);
+  *(uint32_t*)&dst[1] = bus_id; // write 4-byte long bus_id into the 1-4 bytes of array
   if( src != NULL )
   {
     memcpy( &dst[5], src, size);
@@ -1018,7 +994,7 @@ void HAL_FDCAN_TxFifoEmptyCallback(FDCAN_HandleTypeDef *hfdcan)
   
   while( HAL_FDCAN_GetTxFifoFreeLevel(hfdcan) != 0  )
   {
-    char * vb_frame = get_queue_head( can_tx_queues[bus_num] );
+    uint8_t * vb_frame = get_queue_head( can_tx_queues[bus_num] );
     if( vb_frame != NULL )
     {
       uint8_t bus;
@@ -1074,24 +1050,21 @@ uint8_t push_can_frame( FDCAN_HandleTypeDef *handle, uint32_t id, uint8_t length
   return 0;
 }
 
-volatile uint32_t SPI_sent_nbr = 0;
-
 void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
 {
   if( hspi->Instance == SPI4 )
   {
     circular_heap_free( &spi_tx_heap, dequeue( &spi_tx_queue ));
     send_frame_SPI();
-    SPI_sent_nbr++;
   }
 }
 
-// push VB CAN frame into CAN FIFO
+// push VB CAN frame into SPI DMA
 uint8_t send_frame_SPI(void)
 {
   if( !LL_SPI_IsActiveMasterTransfer(SPI4) )
   {
-    char * vb_frame = get_queue_head( &spi_tx_queue );
+    uint8_t * vb_frame = get_queue_head( &spi_tx_queue );
     if( vb_frame != NULL )
     {
       // bind payload to SPI DMA transfer

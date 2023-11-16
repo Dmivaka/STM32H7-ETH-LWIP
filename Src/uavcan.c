@@ -266,7 +266,7 @@ void process_canard_TX_queue( uint8_t queue_num )
       uint32_t id = ti->frame.extended_can_id;
       uint32_t bus_id = encode_bus_id( bus_num, id );
       
-      memcpy( &vb_frame[1], &bus_id, 4);
+      *(uint32_t*)&vb_frame[1] = bus_id;  // write 4-byte long bus_id into the 1-4 bytes of array
       memcpy( &vb_frame[5], (uint8_t *)ti->frame.payload, ti->frame.payload_size);
       
       distribute_vb_frame( vb_frame );
