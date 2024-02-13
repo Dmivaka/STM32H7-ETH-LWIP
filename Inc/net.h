@@ -12,6 +12,7 @@ void udp_client_send(void);
 void udp_lcm_connect(void);
 void transmit_servo_state(void);
 void distribute_vb_frame( uint8_t * vb_frame );
+void wake_on_lan( uint8_t * mac_addr );
 //-----------------------------------------------
 #ifdef __cplusplus
 }

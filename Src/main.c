@@ -92,6 +92,7 @@ GPIO_TypeDef *indicators_ports[3] = { CAN1_ind_GPIO_Port, CAN2_ind_GPIO_Port, CA
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 void PeriphCommonClock_Config(void);
+static void MPU_Initialize(void);
 static void MPU_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
@@ -109,9 +110,18 @@ void UDP_TX_send( uint16_t *UDP_TX_level );
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 extern uint64_t TIM7_ITs;
+
+#pragma optimize s=none
 uint64_t micros()
 { 
   return (uint64_t)(__HAL_TIM_GET_COUNTER(&htim7) + 50000u * TIM7_ITs);
+}
+
+#pragma optimize s=none
+void micros_delay( uint64_t delay )
+{
+  uint64_t timestamp = micros();
+  while( micros() < timestamp + delay );
 }
 
 uint32_t previos_char = 9000;
@@ -145,6 +155,8 @@ struct pbuf *UDP_TX_buf = NULL;
 //#define uavcan_en
 
 uint8_t MY_IP_ADDRESS[4] = {10, 127, 0, 2};
+uint8_t host_mac_addr[6] = {0x7c,0x83,0x34,0xb9,0xee,0x65};
+//uint8_t host_mac_addr[6] = {0x00,0xe0,0x4c,0x46, 0xfe, 0xff};
 /* USER CODE END 0 */
 
 /**
@@ -164,9 +176,6 @@ int main(void)
 
   /* USER CODE END 1 */
 
-  /* MPU Configuration--------------------------------------------------------*/
-  MPU_Config();
-
   /* Enable I-Cache---------------------------------------------------------*/
   SCB_EnableICache();
 
@@ -177,6 +186,9 @@ int main(void)
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
+
+  /* MPU Configuration--------------------------------------------------------*/
+  MPU_Config();
 
   /* USER CODE BEGIN Init */
 
@@ -260,6 +272,13 @@ int main(void)
 
   // enable the companion chip
   LL_GPIO_SetOutputPin(GPIOE, LL_GPIO_PIN_5);
+  
+  // try wake on lan
+  for( int i = 0; i < 2; i++ )
+  {
+    micros_delay(100000);
+    wake_on_lan( host_mac_addr );
+  }
 
   /* USER CODE END 2 */
 
@@ -405,10 +424,6 @@ void SystemClock_Config(void)
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE0);
 
   while(!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY)) {}
-
-  /** Macro to configure the PLL clock source
-  */
-  __HAL_RCC_PLL_PLLSOURCE_CONFIG(RCC_PLLSOURCE_HSE);
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
@@ -872,6 +887,8 @@ static void MX_DMA_Init(void)
 static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
+/* USER CODE BEGIN MX_GPIO_Init_1 */
+/* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOE_CLK_ENABLE();
@@ -918,6 +935,8 @@ static void MX_GPIO_Init(void)
   HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
+/* USER CODE BEGIN MX_GPIO_Init_2 */
+/* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */

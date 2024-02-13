@@ -285,3 +285,27 @@ void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const
   
   pbuf_free(p);
 }
+
+void wake_on_lan( uint8_t * mac_addr )
+{
+  uint8_t my_packet[102] = {0};
+  
+  for( int i = 0; i < 6; i++ )
+  {
+    my_packet[i] = 0xFF;
+  }
+  
+  for( int i = 6; i < 102; i += 6 )
+  {
+    memcpy( &my_packet[i], mac_addr, 6 );
+  }
+  
+  ip_addr_t Broadcast_Addr;
+  IP4_ADDR(&Broadcast_Addr, 255, 255, 255, 255 ); 
+  
+  struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, sizeof(my_packet), PBUF_RAM); // allocate LWIP memory for outgoing UDP packet
+  
+  pbuf_take(p, (void *) my_packet, sizeof(my_packet));
+  udp_sendto(upcb_1, p, &Broadcast_Addr, 0);
+  pbuf_free(p);
+}

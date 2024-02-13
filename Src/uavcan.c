@@ -43,18 +43,18 @@ typedef struct driver_struct
 // to disable device set its node_id to zero             
 driver_struct drivers_map[12] = 
 { 
-  { 12, 0, 1120, 1121}, // 0 drive
-  { 11, 0, 1110, 1111}, // 1 drive
-  { 10, 0, 1100, 1101}, // 2 drive
-  { 22, 1, 1220, 1221}, // 3 drive
-  { 21, 1, 1210, 1211}, // 4 drive
-  { 20, 1, 1200, 1201}, // 5 drive
-  { 32, 3, 1320, 1321}, // 6 drive
-  { 31, 3, 1310, 1311}, // 7 drive
-  { 30, 3, 1300, 1301}, // 8 drive
-  { 42, 4, 1420, 1421}, // 9 drive
-  { 41, 4, 1410, 1411}, // 10 drive
-  { 40, 4, 1400, 1401}, // 11 drive
+  { 10, 1, 1100, 1101}, // 0 drive //
+  { 11, 0, 1110, 1111}, // 1 drive //
+  { 12, 0, 1120, 1121}, // 2 drive //
+  { 20, 1, 1200, 1201}, // 3 drive //
+  { 21, 1, 1210, 1211}, // 4 drive //
+  { 22, 0, 1220, 1221}, // 5 drive //
+  { 30, 4, 1300, 1301}, // 6 drive //
+  { 31, 4, 1310, 1311}, // 7 drive //
+  { 32, 3, 1320, 1321}, // 8 drive //
+  { 40, 4, 1400, 1401}, // 9 drive //
+  { 41, 3, 1410, 1411}, // 10 drive //
+  { 42, 3, 1420, 1421}, // 11 drive //
  };
 
 CanardPortID index_to_port( uint8_t index )
@@ -145,11 +145,11 @@ void UAVCAN_send(void)
   {
     if( drivers_map[i].node_id != 0 ) // check if selected drive is ebabled 
     {
-      uavcan_tx_array.value.elements[0] = rx_lcm_msg.position[i];
+      uavcan_tx_array.value.elements[0] = -rx_lcm_msg.position[i];
       uavcan_tx_array.value.elements[1] = rx_lcm_msg.kp[i];
-      uavcan_tx_array.value.elements[2] = rx_lcm_msg.velocity[i];
+      uavcan_tx_array.value.elements[2] = -rx_lcm_msg.velocity[i];
       uavcan_tx_array.value.elements[3] = rx_lcm_msg.kd[i];
-      uavcan_tx_array.value.elements[4] = rx_lcm_msg.torque[i]; 
+      uavcan_tx_array.value.elements[4] = -rx_lcm_msg.torque[i]; 
       
       size_t c_serialized_size = uavcan_primitive_array_Real32_1_0_EXTENT_BYTES_;
 
@@ -215,9 +215,9 @@ uint8_t parse_canard_frame( uint32_t id, size_t size, void* payload)
           Error_Handler();
         }
 
-        tx_lcm_msg.position[index]= array.value.elements[0];
-        tx_lcm_msg.velocity[index]= array.value.elements[1];
-        tx_lcm_msg.torque[index]= array.value.elements[2];
+        tx_lcm_msg.position[index]= -array.value.elements[0];
+        tx_lcm_msg.velocity[index]= -array.value.elements[1];
+        tx_lcm_msg.torque[index]= -array.value.elements[2];
         
         response_recorder |= 1UL << index; // set bit corresponding to the device answered
 

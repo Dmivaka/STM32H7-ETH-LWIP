@@ -69,6 +69,7 @@ void *deserialize_can_frame( uint8_t *bus, uint32_t *id, size_t *size, uint8_t* 
 #define CAN3_ind_GPIO_Port GPIOC
 #define CAN1_ind_Pin GPIO_PIN_1
 #define CAN1_ind_GPIO_Port GPIOE
+
 /* USER CODE BEGIN Private defines */
 
 /* USER CODE END Private defines */
