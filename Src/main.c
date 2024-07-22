@@ -18,6 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "fatfs.h"
 #include "lwip.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -35,6 +36,8 @@
 #include "uavcan.h"
 
 #include "circular_heap.h"
+
+#include "sd_ini_reader.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -44,6 +47,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define sd_param
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -56,6 +60,8 @@
 FDCAN_HandleTypeDef hfdcan1;
 FDCAN_HandleTypeDef hfdcan2;
 FDCAN_HandleTypeDef hfdcan3;
+
+SD_HandleTypeDef hsd1;
 
 SPI_HandleTypeDef hspi3;
 SPI_HandleTypeDef hspi4;
@@ -103,6 +109,7 @@ static void MX_FDCAN3_Init(void);
 static void MX_SPI3_Init(void);
 static void MX_TIM7_Init(void);
 static void MX_SPI4_Init(void);
+static void MX_SDMMC1_SD_Init(void);
 /* USER CODE BEGIN PFP */
 void UDP_TX_send( uint16_t *UDP_TX_level );
 /* USER CODE END PFP */
@@ -154,10 +161,10 @@ struct pbuf *UDP_TX_buf = NULL;
 
 //#define uavcan_en
 
-uint8_t MY_IP_ADDRESS[4] = {10, 127, 0, 2};
 //uint8_t host_mac_addr[6] = {0x7c,0x83,0x34,0xb9,0xee,0x65}; // MORS 1
-uint8_t host_mac_addr[6] = {0x7c,0x83,0x34,0xb9,0xf2,0x91}; // MORS 2
-//uint8_t host_mac_addr[6] = {0x00,0xe0,0x4c,0x46, 0xfe, 0xff};
+//uint8_t host_mac_addr[6] = {0x7c,0x83,0x34,0xb9,0xf2,0x91}; // MORS 2
+uint8_t MY_IP_ADDRESS[4];
+uint8_t host_mac_addr[6] = {0}; // MORS 2
 /* USER CODE END 0 */
 
 /**
@@ -213,11 +220,23 @@ int main(void)
   MX_FDCAN1_Init();
   MX_FDCAN2_Init();
   MX_FDCAN3_Init();
-  MX_LWIP_Init();
+  //MX_LWIP_Init();
   MX_SPI3_Init();
   MX_TIM7_Init();
   MX_SPI4_Init();
+  MX_SDMMC1_SD_Init();
+  MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
+  #ifdef sd_param
+  parse_sd_ini();
+  #endif
+  
+  HAL_Delay(250);
+  
+  MX_LWIP_Init();
+  
+  HAL_Delay(250);
+    
   uint16_t UDP_TX_level = 0;
   UDP_TX_buf = pbuf_alloc(PBUF_TRANSPORT, UDP_TX_size, PBUF_RAM); // allocate LWIP memory for outgoing UDP packet
   
@@ -678,6 +697,33 @@ static void MX_FDCAN3_Init(void)
     Error_Handler();
   }
   /* USER CODE END FDCAN3_Init 2 */
+
+}
+
+/**
+  * @brief SDMMC1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SDMMC1_SD_Init(void)
+{
+
+  /* USER CODE BEGIN SDMMC1_Init 0 */
+
+  /* USER CODE END SDMMC1_Init 0 */
+
+  /* USER CODE BEGIN SDMMC1_Init 1 */
+
+  /* USER CODE END SDMMC1_Init 1 */
+  hsd1.Instance = SDMMC1;
+  hsd1.Init.ClockEdge = SDMMC_CLOCK_EDGE_RISING;
+  hsd1.Init.ClockPowerSave = SDMMC_CLOCK_POWER_SAVE_DISABLE;
+  hsd1.Init.BusWide = SDMMC_BUS_WIDE_1B;
+  hsd1.Init.HardwareFlowControl = SDMMC_HARDWARE_FLOW_CONTROL_DISABLE;
+  hsd1.Init.ClockDiv = 20;
+  /* USER CODE BEGIN SDMMC1_Init 2 */
+
+  /* USER CODE END SDMMC1_Init 2 */
 
 }
 
